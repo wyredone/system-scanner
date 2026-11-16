@@ -2,24 +2,26 @@
 
 Scans Windows services, drivers, startup entries, scheduled tasks, hijack points,
 WMI persistence, antivirus status and remote-access history, and flags anything
-that looks like malware or unwanted remote access. READ-ONLY: it never changes,
-stops, deletes or uploads anything.
+that looks like malware or unwanted remote access. Scans are read-only.
 
 Start with "Scan Computer.bat" (normal) or "Scan Computer (Admin).bat" (complete scan).
 """
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import subprocess
 import sys
 import threading
 import tkinter as tk
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import analysis as A
+from process_control import stop_process
 
 SEV_COLORS = {"High": "#f8c9c4", "Medium": "#fde7b0", "Low": "#dbe9f7", "Info": "#ffffff"}
 
@@ -52,6 +54,9 @@ class App(tk.Tk):
         self.meta: dict = {}
         self.scan_file: Path | None = None
         self.visible: list[A.Finding] = []
+        self.process_rows = []
+        self.live_processes = False
+        self.busy = False
         self._build()
         self.after(200, self.start_scan)
 
@@ -84,7 +89,15 @@ class App(tk.Tk):
         self.summary = tk.StringVar(value="")
         ttk.Label(self, textvariable=self.summary, padding=(10, 0), font=("Segoe UI", 10, "bold")).pack(fill="x")
 
-        filt = ttk.Frame(self, padding=(8, 4))
+        tabs = ttk.Notebook(self)
+        tabs.pack(fill="both", expand=True)
+        findings_tab = ttk.Frame(tabs)
+        processes_tab = ttk.Frame(tabs, padding=8)
+        tabs.add(findings_tab, text="Persistence Findings")
+        tabs.add(processes_tab, text="Running Processes")
+        self._build_process_tab(processes_tab)
+
+        filt = ttk.Frame(findings_tab, padding=(8, 4))
         filt.pack(fill="x")
         ttk.Label(filt, text="Show:").pack(side="left")
         self.sev_vars = {}
@@ -106,7 +119,7 @@ class App(tk.Tk):
         self.only_new = tk.BooleanVar(value=False)
         ttk.Checkbutton(filt, text="Only NEW since last scan", variable=self.only_new, command=self.refresh).pack(side="left")
 
-        pane = ttk.PanedWindow(self, orient="vertical")
+        pane = ttk.PanedWindow(findings_tab, orient="vertical")
         pane.pack(fill="both", expand=True, padx=8, pady=(4, 8))
 
         tree_frame = ttk.Frame(pane)
@@ -134,7 +147,7 @@ class App(tk.Tk):
         ttk.Button(btns, text="Open file location", command=self.on_open_location).pack(side="left", padx=6)
         ttk.Button(btns, text="Copy SHA256", command=self.on_copy_hash).pack(side="left")
         ttk.Button(btns, text="Copy details", command=self.on_copy_details).pack(side="left", padx=6)
-        ttk.Label(btns, text="Read-only: nothing is changed. 'High' = worth investigating, not proof of malware.",
+        ttk.Label(btns, text="Scans are read-only. Review the evidence behind each finding.",
                   foreground="#666").pack(side="right")
         self.detail = tk.Text(det, height=12, wrap="word", font=("Consolas", 10), relief="solid", borderwidth=1)
         self.detail.pack(fill="both", expand=True)
@@ -143,8 +156,110 @@ class App(tk.Tk):
 
         self.sort_col, self.sort_rev = "sev", False
 
+    def _build_process_tab(self, frame) -> None:
+        controls = ttk.Frame(frame)
+        controls.pack(fill="x")
+        self.stop_btn = ttk.Button(controls, text="Stop Selected Process", command=self.on_stop)
+        self.stop_btn.pack(side="left")
+        self.stop_btn.state(["disabled"])
+        self.process_status = tk.StringVar(value="Run a scan to load live processes.")
+        ttk.Label(controls, textvariable=self.process_status).pack(side="left", padx=8)
+
+        table = ttk.Frame(frame)
+        table.pack(fill="both", expand=True, pady=6)
+        columns = ("severity", "pid", "name", "path")
+        self.process_tree = ttk.Treeview(table, columns=columns, show="headings", selectmode="browse")
+        for column, title, width in zip(columns, ("Severity", "PID", "Name", "Executable"), (80, 70, 220, 650)):
+            self.process_tree.heading(column, text=title)
+            self.process_tree.column(column, width=width, stretch=column == "path")
+        scrollbar = ttk.Scrollbar(table, orient="vertical", command=self.process_tree.yview)
+        self.process_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.process_tree.pack(side="left", fill="both", expand=True)
+        self.process_tree.bind("<<TreeviewSelect>>", self.show_process)
+        self.process_detail = tk.Text(frame, height=12, wrap="word", state="disabled")
+        self.process_detail.pack(fill="x")
+
+    def selected_process(self):
+        selection = self.process_tree.selection()
+        return self.process_rows[int(selection[0])] if selection else None
+
+    def show_process(self, _event=None) -> None:
+        process = self.selected_process()
+        can_stop = (
+            self.live_processes and not self.busy and process and process.path
+            and process.details.get("StartTicks")
+        )
+        self.stop_btn.state(["!disabled"] if can_stop else ["disabled"])
+        self.process_detail.configure(state="normal")
+        self.process_detail.delete("1.0", "end")
+        if process:
+            self.process_detail.insert("1.0", process.as_text())
+        self.process_detail.configure(state="disabled")
+
+    def load_process_rows(self, data: dict, live: bool) -> None:
+        self.live_processes = live
+        self.process_rows = A.process_findings(data)
+        self.process_tree.delete(*self.process_tree.get_children())
+        for index, process in enumerate(self.process_rows):
+            self.process_tree.insert("", "end", iid=str(index), values=(
+                process.severity, process.details.get("PID"), process.name, process.path
+            ))
+        coverage = self.meta.get("ProcessCoverage", "Process inventory unavailable")
+        self.process_status.set(f"{'Live snapshot' if live else 'Saved scan (view only)'} | {coverage}")
+        self.show_process()
+
+    def on_stop(self) -> None:
+        process = self.selected_process()
+        if not self.live_processes or self.busy or not process:
+            return
+        pid = int(process.details["PID"])
+        ticks = int(process.details["StartTicks"])
+        self.busy = True
+        self.scan_btn.state(["disabled"])
+        self.show_process()
+        confirmed = messagebox.askyesno(
+            "Force stop process",
+            f"Stop {process.name} (PID {pid})? Unsaved work in this process may be lost.\n\n{process.path}",
+            default="no", parent=self,
+        )
+        if confirmed:
+            threading.Thread(target=self._stop_worker, args=(process, pid, ticks), daemon=True).start()
+        else:
+            self.busy = False
+            self.scan_btn.state(["!disabled"])
+            self.show_process()
+
+    def _stop_worker(self, process, pid: int, ticks: int) -> None:
+        try:
+            result = stop_process(pid, process.path, ticks)
+        except OSError as exc:
+            result = f"Stop failed ({exc})"
+        record = {
+            "time": datetime.now().astimezone().isoformat(),
+            "pid": pid, "start_ticks": ticks, "path": process.path,
+            "sha256": process.sha256, "result": result,
+        }
+        try:
+            A.SCANS_DIR.mkdir(exist_ok=True)
+            with (A.SCANS_DIR / "process-actions.jsonl").open("a", encoding="utf-8") as log:
+                log.write(json.dumps(record) + "\n")
+        except OSError as exc:
+            result += f" | Could not write action log: {exc}"
+        self.after(0, self._stop_finished, result)
+
+    def _stop_finished(self, result: str) -> None:
+        self.busy = False
+        self.start_scan()
+        messagebox.showinfo("Process stop result", result, parent=self)
+
     # ------------------------------------------------------------ scanning
     def start_scan(self) -> None:
+        if self.busy:
+            return
+        self.busy = True
+        self.live_processes = False
+        self.show_process()
         self.scan_btn.state(["disabled"])
         self.progress.start(12)
         self.status.set("Starting scan...")
@@ -153,17 +268,22 @@ class App(tk.Tk):
     def _scan_worker(self) -> None:
         try:
             path = A.run_scan(lambda m: self.after(0, self.status.set, f"Scanning: {m}"))
-            self.after(0, self.load_file, path)
+            self.after(0, self._load_live_scan, path)
         except Exception as exc:  # noqa: BLE001
             self.after(0, self._scan_failed, str(exc))
 
+    def _load_live_scan(self, path: Path) -> None:
+        self.busy = False
+        self.load_file(path, live=True)
+
     def _scan_failed(self, msg: str) -> None:
+        self.busy = False
         self.progress.stop()
         self.scan_btn.state(["!disabled"])
         self.status.set("Scan failed")
         messagebox.showerror("Scan failed", msg)
 
-    def load_file(self, path: Path) -> None:
+    def load_file(self, path: Path, live: bool = False) -> None:
         self.progress.stop()
         self.scan_btn.state(["!disabled"])
         try:
@@ -173,6 +293,7 @@ class App(tk.Tk):
             return
         self.scan_file = Path(path)
         self.meta = data.get("Meta") or {}
+        self.load_process_rows(data, live)
         self.findings = A.analyze(data)
         prev = None
         if self.scan_file.parent.resolve() == A.SCANS_DIR.resolve():
@@ -251,6 +372,8 @@ class App(tk.Tk):
             self.destroy()
 
     def on_open(self) -> None:
+        if self.busy:
+            return
         p = filedialog.askopenfilename(initialdir=A.SCANS_DIR, filetypes=[("Scan files", "*.json")])
         if p:
             self.load_file(Path(p))

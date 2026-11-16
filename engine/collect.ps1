@@ -310,6 +310,25 @@ if (Test-Path -LiteralPath $sysconf) {
     $anydeskUnattended = [bool](Select-String -LiteralPath $sysconf -Pattern '_unattended_access\.pwd=' -Quiet)
 }
 
+# ---------- running processes ----------
+Say 'Running processes'
+$processCoverage = 'Complete'
+try {
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    foreach ($proc in $processes) {
+        $ticks = if ($proc.CreationDate) { [string]$proc.CreationDate.ToFileTimeUtc() } else { '' }
+        Add-Entry 'Process' $proc.Name $proc.CommandLine @{
+            PID = $proc.ProcessId; ParentPID = $proc.ParentProcessId; Session = $proc.SessionId
+            StartTicks = $ticks
+            Services = (@($svcs | Where-Object { $_.ProcessId -eq $proc.ProcessId -and $_.ProcessId -gt 0 } |
+                ForEach-Object { $_.Name }) -join ', ')
+        } $proc.ExecutablePath
+    }
+} catch {
+    $processCoverage = 'Incomplete: ' + $_.Exception.Message
+}
+$meta['ProcessCoverage'] = $processCoverage
+
 # ---------- write ----------
 Say 'Writing results'
 $result = [ordered]@{

@@ -1,7 +1,7 @@
 # System Scanner
 
 Scans a Windows PC for malware persistence and unwanted remote access. **Read-only**:
-it never changes, stops, deletes or uploads anything.
+scans only collect data. Process termination is a separate, confirmed action.
 
 ## Run it
 
@@ -28,6 +28,17 @@ install; no extra packages).
   AnyDesk unattended access, and AnyDesk/TeamViewer incoming-session history
 
 Every program file gets a signature check, publisher, creation date and SHA-256.
+
+## Running Processes
+
+Scan the local PC, open **Running Processes**, and select a row to see the executable,
+signature, hash, and related scan entries. **Stop Selected Process** force-stops one
+process after confirmation. Save any work in that process first. Use the admin
+launcher if the normal scan lacks access. Saved scans are view-only.
+
+The stop action verifies the process path and creation time and blocks protected
+targets. Results are written locally to `scans/process-actions.jsonl`. A service
+or scheduled task can restart a stopped process.
 
 ## Reading the results
 

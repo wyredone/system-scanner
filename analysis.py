@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import html
 import json
+import ntpath
 import os
 import re
 import subprocess
@@ -122,7 +123,7 @@ def analyze_item(it: dict) -> Finding:
     trusted_ms = f.microsoft_signed and bool(WINDOWS_DIR.match(path))
     signed_ok = sig == "Valid"
     in_user_dir = bool(USER_WRITABLE.search(path))
-    base = os.path.basename(path).lower()
+    base = ntpath.basename(path).lower()
     text = f"{f.name} {cmd} {path} {f.company}"
 
     if base in SYSTEM_BINARY_NAMES and path and not WINDOWS_DIR.match(path):
@@ -286,11 +287,34 @@ def analyze_global(data: dict) -> list[Finding]:
     return out
 
 
+def process_findings(data: dict) -> list[Finding]:
+    items = data.get("Items") or []
+    if isinstance(items, dict):
+        items = [items]
+    links = {}
+    for item in items:
+        if item.get("Category") != "Process" and item.get("Path"):
+            key = ntpath.normcase(ntpath.normpath(item["Path"]))
+            links.setdefault(key, []).append(f"{item['Category']}: {item['Name']}")
+    results = []
+    for item in items:
+        if item.get("Category") != "Process":
+            continue
+        finding = analyze_item(item)
+        if finding.path:
+            key = ntpath.normcase(ntpath.normpath(finding.path))
+            matches = links.get(key, [])
+            if matches:
+                finding.details = {**finding.details, "Matching scan entries": " | ".join(matches)}
+        results.append(finding)
+    return sorted(results, key=lambda f: (SEV_RANK[f.severity], f.name.lower()))
+
+
 def analyze(data: dict) -> list[Finding]:
     items = data.get("Items") or []
     if isinstance(items, dict):
         items = [items]
-    findings = [analyze_item(it) for it in items] + analyze_global(data)
+    findings = [analyze_item(it) for it in items if it.get("Category") != "Process"] + analyze_global(data)
     findings.sort(key=lambda f: (SEV_RANK[f.severity], f.category, f.name.lower()))
     return findings
 
