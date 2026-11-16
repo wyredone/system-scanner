@@ -29,6 +29,13 @@ install; no extra packages).
 
 Every program file gets a signature check, publisher, creation date and SHA-256.
 
+## Help and local AI
+
+Open **User Guide** in the app or read [user-guide.html](user-guide.html). Click
+**?** beside a group of controls for help. Select a finding or process and click
+**Explain This Finding** to request an advisory summary from local Ollama.
+The default model is `llama3.1:8b`. The guide covers installation and model selection.
+
 ## Running Processes
 
 Scan the local PC, open **Running Processes**, and select a row to see the executable,

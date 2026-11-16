@@ -22,6 +22,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import analysis as A
 from process_control import stop_process
+from finding_ai import explain_finding
 
 SEV_COLORS = {"High": "#f8c9c4", "Medium": "#fde7b0", "Low": "#dbe9f7", "Info": "#ffffff"}
 
@@ -57,6 +58,7 @@ class App(tk.Tk):
         self.process_rows = []
         self.live_processes = False
         self.busy = False
+        self.ai_pending = False
         self._build()
         self.after(200, self.start_scan)
 
@@ -81,10 +83,16 @@ class App(tk.Tk):
         ttk.Button(top, text="Export report (HTML)", command=self.on_export_html).pack(side="left", padx=(6, 0))
         ttk.Button(top, text="Export CSV", command=self.on_export_csv).pack(side="left", padx=(6, 0))
         ttk.Button(top, text="Scans folder", command=lambda: os.startfile(A.SCANS_DIR)).pack(side="left", padx=(6, 0))
-        self.progress = ttk.Progressbar(top, mode="indeterminate", length=160)
+        ttk.Button(top, text="User Guide", command=self.open_guide).pack(side="left", padx=6)
+        self.help_tip(top, "Scans and exports",
+                      "Use the admin launcher for greater visibility. Exports may contain private paths, "
+                      "commands, and remote-access details. Review them before sharing.")
+        status_row = ttk.Frame(self, padding=(8, 0, 8, 4))
+        status_row.pack(fill="x")
+        self.progress = ttk.Progressbar(status_row, mode="indeterminate", length=160)
         self.progress.pack(side="right")
         self.status = tk.StringVar(value="Ready")
-        ttk.Label(top, textvariable=self.status, width=40, anchor="e").pack(side="right", padx=8)
+        ttk.Label(status_row, textvariable=self.status).pack(side="left")
 
         self.summary = tk.StringVar(value="")
         ttk.Label(self, textvariable=self.summary, padding=(10, 0), font=("Segoe UI", 10, "bold")).pack(fill="x")
@@ -119,6 +127,9 @@ class App(tk.Tk):
         self.only_new = tk.BooleanVar(value=False)
         ttk.Checkbutton(filt, text="Only NEW since last scan", variable=self.only_new, command=self.refresh).pack(side="left")
 
+        self.help_tip(filt, "Finding filters",
+                      "High and Medium are review priorities. Info is hidden initially. "
+                      "NEW compares category, name, path, and command against the previous saved scan.")
         pane = ttk.PanedWindow(findings_tab, orient="vertical")
         pane.pack(fill="both", expand=True, padx=8, pady=(4, 8))
 
@@ -147,8 +158,11 @@ class App(tk.Tk):
         ttk.Button(btns, text="Open file location", command=self.on_open_location).pack(side="left", padx=6)
         ttk.Button(btns, text="Copy SHA256", command=self.on_copy_hash).pack(side="left")
         ttk.Button(btns, text="Copy details", command=self.on_copy_details).pack(side="left", padx=6)
-        ttk.Label(btns, text="Scans are read-only. Review the evidence behind each finding.",
-                  foreground="#666").pack(side="right")
+        ttk.Button(btns, text="Explain This Finding",
+                   command=lambda: self.on_explain(self.selected())).pack(side="left", padx=6)
+        self.help_tip(btns, "Finding evidence and AI",
+                      "Review the scanner reasons and signature first. AI uses local Ollama and may "
+                      "be wrong. VirusTotal opens a browser lookup for the selected file hash.")
         self.detail = tk.Text(det, height=12, wrap="word", font=("Consolas", 10), relief="solid", borderwidth=1)
         self.detail.pack(fill="both", expand=True)
         self.detail.configure(state="disabled")
@@ -156,12 +170,71 @@ class App(tk.Tk):
 
         self.sort_col, self.sort_rev = "sev", False
 
+    def help_tip(self, parent, title: str, description: str) -> None:
+        ttk.Button(parent, text="?", width=3,
+                   command=lambda: messagebox.showinfo(title, description, parent=self)
+                   ).pack(side="left", padx=4)
+
+    def open_guide(self) -> None:
+        guide = A.APP_DIR / "user-guide.html"
+        if guide.is_file():
+            webbrowser.open(guide.as_uri())
+        else:
+            messagebox.showerror("User Guide", "user-guide.html is missing from the app folder.", parent=self)
+
+    def on_explain(self, finding: A.Finding | None) -> None:
+        if finding is None:
+            messagebox.showinfo("Explain This Finding", "Select a finding or process first.", parent=self)
+            return
+        if self.ai_pending:
+            messagebox.showinfo("Explain This Finding", "An explanation is already running.", parent=self)
+            return
+        self.ai_pending = True
+        self.status.set("Waiting for local Ollama…")
+        threading.Thread(target=self._explain_worker, args=(finding,), daemon=True).start()
+
+    def _explain_worker(self, finding: A.Finding) -> None:
+        try:
+            model, response = explain_finding(finding)
+        except RuntimeError as exc:
+            self.after(0, self._show_explanation, finding.name, "", str(exc))
+        else:
+            self.after(0, self._show_explanation, finding.name, model, response)
+
+    def _show_explanation(self, name: str, model: str, response: str) -> None:
+        self.ai_pending = False
+        self.status.set("Explanation ready" if model else "Explanation unavailable")
+        if not model:
+            messagebox.showerror("Local Ollama", response, parent=self)
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("Finding Explanation")
+        dialog.geometry("700x470")
+        ttk.Label(dialog, text=f"{name} | {model}", wraplength=660,
+                  padding=10).pack(fill="x")
+        ttk.Label(dialog, text="AI-generated interpretation. Verify against the recorded evidence.",
+                  padding=(10, 0)).pack(fill="x")
+        body = ttk.Frame(dialog, padding=10)
+        body.pack(fill="both", expand=True)
+        content = tk.Text(body, wrap="word")
+        scrollbar = ttk.Scrollbar(body, orient="vertical", command=content.yview)
+        content.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        content.pack(side="left", fill="both", expand=True)
+        content.insert("1.0", response)
+        content.configure(state="disabled")
+
     def _build_process_tab(self, frame) -> None:
         controls = ttk.Frame(frame)
         controls.pack(fill="x")
         self.stop_btn = ttk.Button(controls, text="Stop Selected Process", command=self.on_stop)
         self.stop_btn.pack(side="left")
         self.stop_btn.state(["disabled"])
+        ttk.Button(controls, text="Explain This Finding",
+                   command=lambda: self.on_explain(self.selected_process())).pack(side="left", padx=6)
+        self.help_tip(controls, "Process actions",
+                      "Stops require confirmation and a verified process from a live scan. "
+                      "Force-stopping can lose unsaved work. A service or task may restart the process.")
         self.process_status = tk.StringVar(value="Run a scan to load live processes.")
         ttk.Label(controls, textvariable=self.process_status).pack(side="left", padx=8)
 

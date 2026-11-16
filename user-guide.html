@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System Scanner User Guide</title>
+<style>
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { max-width: 48rem; margin: 0 auto; padding: 2rem 1.2rem 4rem; line-height: 1.6; }
+h1, h2 { line-height: 1.2; }
+h1 { font-size: clamp(2rem, 6vw, 3.25rem); margin-bottom: .5rem; }
+h2 { margin-top: 2.4rem; padding-top: .9rem; border-top: 1px solid GrayText; }
+nav { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin-top: 1.3rem; }
+pre { padding: .75rem 1rem; border: 1px solid GrayText; border-radius: .4rem; overflow: auto; }
+dt { font-weight: 700; }
+dd { margin: 0 0 .6rem; }
+</style>
+</head>
+<body>
+<header>
+<h1>System Scanner User Guide</h1>
+<p>Review Windows startup entries, remote-access activity, and running processes.</p>
+<nav aria-label="Guide sections">
+<a href="#scan">Scan</a>
+<a href="#findings">Findings</a>
+<a href="#ai">Local AI</a>
+<a href="#processes">Processes</a>
+<a href="#reports">Reports</a>
+</nav>
+</header>
+<main>
+<section id="scan">
+<h2>Run a scan</h2>
+<ol>
+<li>Extract the project folder and install Python 3 with Tkinter.</li>
+<li>Double-click <strong>Scan Computer.bat</strong>. The scan starts when the app opens.</li>
+<li>For greater visibility, use <strong>Scan Computer (Admin).bat</strong> and accept the Windows prompt.</li>
+</ol>
+<p>Click the <strong>?</strong> buttons beside controls for help. A scan can miss entries because of permissions or collection errors.</p>
+</section>
+<section id="findings">
+<h2>Review findings</h2>
+<dl>
+<dt>High</dt><dd>Review first. A heuristic may flag legitimate software.</dd>
+<dt>Medium</dt><dd>Verify software and activity you do not recognize.</dd>
+<dt>Low</dt><dd>Review incidental issues such as startup entries pointing to missing files.</dd>
+<dt>Info</dt><dd>Inventory and scan context. Tick <strong>Info</strong> to show these rows.</dd>
+</dl>
+<p>Select a row to read its recorded evidence. <strong>Check hash on VirusTotal</strong> opens a separate browser lookup for the file hash.</p>
+</section>
+<section id="ai">
+<h2>Explain a finding with local Ollama</h2>
+<ol>
+<li>Install and start Ollama on the same Windows PC. Confirm it is running on the default local port, <code>11434</code>.</li>
+<li>Use the default model by running this in a terminal:
+<pre><code>ollama pull llama3.1:8b</code></pre>
+</li>
+<li>Select a row in <strong>Persistence Findings</strong> or <strong>Running Processes</strong>, then click <strong>Explain This Finding</strong>.</li>
+</ol>
+<p>To use another installed local model, set the <code>SCANNER_OLLAMA_MODEL</code> environment variable to the exact tag from <code>ollama list</code>, then relaunch the scanner.</p>
+<p>The scanner sends severity, signature information, and matching rule reasons to the loopback Ollama endpoint. Review the generated explanation against the raw evidence. The explanation cannot change severity or perform actions.</p>
+<p>If the app cannot reach Ollama, start the service and try again. If the model is missing, install it or check the configured tag. Model loading and generation may take longer on the first request.</p>
+</section>
+<section id="processes">
+<h2>Review and stop a running process</h2>
+<p>Use a fresh scan. Open <strong>Running Processes</strong> and review the selected process, PID, executable path, and related entries. <strong>Stop Selected Process</strong> force-stops one eligible process after confirmation. Save your work before proceeding. The app checks the process identity again and records the result in <code>scans/process-actions.jsonl</code>.</p>
+<p>Saved scans are view-only. A service or scheduled task may restart a stopped process.</p>
+</section>
+<section id="reports">
+<h2>Compare and export reports</h2>
+<p>Reports are saved under <code>scans</code>. <strong>Only NEW since last scan</strong> shows entries with a new category, name, path, or command combination. A change to a file at the same path can be missed if the entry identity is unchanged.</p>
+<p>Use <strong>Export report (HTML)</strong> for browser viewing or <strong>Export CSV</strong> for spreadsheets. Review exported reports for private information before sharing.</p>
+</section>
+</main>
+</body>
+</html>
