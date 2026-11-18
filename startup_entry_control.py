@@ -5,7 +5,7 @@ from uuid import uuid4
 import analysis as A
 
 PREFIX = r"SOFTWARE\Microsoft\Windows\CurrentVersion"
-KEYS = {f"{prefix}\\{suffix}".casefold() for suffix in ("Run", "RunOnce")}
+KEYS = {f"{PREFIX}\\{suffix}".casefold() for suffix in ("Run", "RunOnce")}
 
 
 def registry_location(location, name):
