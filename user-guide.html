@@ -104,6 +104,9 @@ dd { margin: 0 0 .6rem; }
 <p>Ollama settings lists installed local models. Explain scan sends a bounded set of finding summaries to the selected model. Use the evidence selector to open cited findings.</p>
 <p>Redacted export previews an inventory by severity and category. Names, paths, addresses, arguments, and free text are omitted. Cancel ends an in-progress collection. Retry failed checks refreshes incomplete sections and any required process or service data. The resulting scan also contains records from the original collection.</p>
 </section>
+<section id="priority"><h2>Review priority and flags</h2>
+<p>The Priority column sorts findings by review urgency. High starts at 70, Medium at 40, and Low at 10. Distinct flags add up to 29 points. For example, a signature mismatch adds 18 and script behavior adds 6. An informational entry or collection coverage message receives zero. The score measures rule-based urgency. A malware probability would require calibration against labeled examples.</p>
+<p>Read the Flags column and select a row to see the reason for each rule match. Running Processes also opens in priority order. Enable Scan sounds on Overview for audible completion, high-priority, and scan-error alerts.</p></section>
 </main>
 </body>
 </html>

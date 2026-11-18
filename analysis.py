@@ -57,6 +57,28 @@ REMOTE_TOOLS = re.compile(
     r"meshagent|action1|level\.io|simplehelp|syncro|kaseya|ninjarmm", re.I)
 
 
+FLAG_RULES = (
+    ("File was modified after", "Signature mismatch"),
+    ("Referenced script or DLL signature status: HashMismatch", "Signature mismatch"),
+    ("Referenced script or DLL signature status:", "Payload signature"),
+    ("Uses a Windows system file name", "System name"),
+    ("Name imitates", "System name"),
+    ("Command line uses", "Script behavior"),
+    ("Unsigned program running", "Unsigned user path"),
+    ("Not signed by", "Unverified publisher"),
+    ("Remote-access tool", "Remote control"),
+    ("Someone connected", "Recent session"),
+    ("Hidden scheduled", "Hidden task"),
+    ("Hijacks how", "Startup override"),
+    ("WMI event that runs", "WMI execution"),
+    ("Points to a file", "Missing file"),
+    ("Auto-start service whose", "Missing file"),
+)
+FLAG_WEIGHTS = {"Signature mismatch": 18, "System name": 12, "Unsigned user path": 10,
+                "WMI execution": 10, "Startup override": 8, "Script behavior": 6,
+                "Hidden task": 5, "Payload signature": 4}
+
+
 @dataclass
 class Finding:
     severity: str
@@ -81,9 +103,30 @@ class Finding:
     def microsoft_signed(self) -> bool:
         return self.sig == "Valid" and "microsoft" in (self.signer or "").lower()
 
+    @property
+    def flags(self) -> list[str]:
+        labels = []
+        for reason in self.reasons:
+            for prefix, label in FLAG_RULES:
+                if reason.startswith(prefix):
+                    if label not in labels:
+                        labels.append(label)
+                    break
+        if not labels and self.severity != "Info" and self.category != "Coverage":
+            labels.append(self.category + " review")
+        return labels
+
+    @property
+    def priority(self) -> int:
+        if self.category == "Coverage" or self.severity == "Info":
+            return 0
+        base = {"High": 70, "Medium": 40, "Low": 10}[self.severity]
+        return base + min(29, sum(FLAG_WEIGHTS.get(flag, 2) for flag in self.flags))
+
     def as_text(self) -> str:
         lines = [
             f"Severity:  {self.severity}" + ("   (NEW since last scan)" if self.is_new else ""),
+            f"Review priority: {self.priority}/100  |  Flags: {', '.join(self.flags) or 'None'}",
             f"Category:  {self.category}",
             f"Name:      {self.name}",
             f"Command:   {self.command}",
@@ -488,11 +531,11 @@ def export_csv(findings: list[Finding], path: Path) -> None:
     with open(path, "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
         w.writerow(["Severity", "New", "Category", "Name", "Command", "File", "Signature", "Signer",
-                    "Company", "Created", "SHA256", "Reasons", "Details"])
+                    "Company", "Created", "SHA256", "Reasons", "Details", "Priority", "Flags"])
         for f in findings:
             values = [f.severity, "yes" if f.is_new else "", f.category, f.name, f.command, f.path, f.sig,
                         f.signer, f.company, f.created, f.sha256, " | ".join(f.reasons),
-                        "; ".join(f"{k}={v}" for k, v in f.details.items() if k != "TaskXml")]
+                        "; ".join(f"{k}={v}" for k, v in f.details.items() if k != "TaskXml"), str(f.priority), ", ".join(f.flags)]
             w.writerow(["'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value for value in values])
 
 
@@ -501,11 +544,11 @@ def export_html(findings: list[Finding], meta: dict, path: Path, min_severity: s
     counts = {s: sum(1 for f in findings if f.severity == s) for s in SEVERITIES}
     shown = [f for f in findings if SEV_RANK[f.severity] <= SEV_RANK[min_severity]]
     rows = []
-    for f in shown:
+    for f in sorted(shown, key=lambda row: -row.priority):
         vt = (f'<a href="https://www.virustotal.com/gui/file/{e(f.sha256)}" target="_blank">VirusTotal</a>'
               if f.sha256 else "")
         rows.append(
-            f'<tr class="{f.severity.lower()}"><td><b>{e(f.severity)}</b>{" <span class=new>NEW</span>" if f.is_new else ""}</td>'
+            f'<tr class="{f.severity.lower()}"><td><b>{e(f.severity)}</b> · {f.priority}/100<br>{e(", ".join(f.flags))}{" <span class=new>NEW</span>" if f.is_new else ""}</td>'
             f"<td>{e(f.category)}</td><td>{e(f.name)}<div class=cmd>{e(f.command)}</div></td>"
             f"<td>{e(f.sig)}<br>{e(f.signer)}</td><td>{'<br>'.join(e(r) for r in f.reasons)}</td><td>{vt}</td></tr>")
     doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>System Scan - {e(meta.get('Computer',''))}</title>

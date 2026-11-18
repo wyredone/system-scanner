@@ -73,6 +73,9 @@ class App(tk.Tk):
         if self.settings.get("model"):
             os.environ["SCANNER_OLLAMA_MODEL"] = self.settings["model"]
         self.changes = {}
+        asset_dir = A.APP_DIR / "assets"
+        self.icons = {p.stem: tk.PhotoImage(file=str(p)) for p in asset_dir.glob("*.png")}
+        self.iconphoto(True, self.icons["shield"])
         self._build()
         self.after(200, self.start_scan)
 
@@ -117,7 +120,7 @@ class App(tk.Tk):
         style.map("Metric.TButton", background=[("active", EDGE), ("focus", EDGE)])
         header = ttk.Frame(self, padding=(16, 12, 16, 4))
         header.pack(fill="x")
-        ttk.Label(header, text="System Scanner", style="Title.TLabel").pack(side="left")
+        ttk.Label(header, text="  System Scanner", image=self.icons["shield"], compound="left", style="Title.TLabel").pack(side="left")
         ttk.Label(header, text="ADMINISTRATOR" if is_admin() else "STANDARD ACCESS",
                   style="Status.TLabel").pack(side="right")
 
@@ -203,11 +206,11 @@ class App(tk.Tk):
         pane.pack(fill="both", expand=True, padx=8, pady=(4, 8))
 
         tree_frame = ttk.Frame(pane)
-        cols = ("sev", "new", "cat", "name", "signer", "why")
+        cols = ("priority", "flags", "sev", "new", "cat", "name", "signer", "why")
         self.tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="browse")
-        for c, label, w, stretch in (("sev", "Severity", 75, False), ("new", "New", 45, False),
-                                      ("cat", "Category", 105, False), ("name", "Name", 340, True),
-                                      ("signer", "Signed by", 200, False), ("why", "Why flagged", 460, True)):
+        for c, label, w, stretch in (("priority", "Priority", 65, False), ("flags", "Flags", 145, True), ("sev", "Severity", 75, False), ("new", "New", 45, False),
+                                      ("cat", "Category", 105, False), ("name", "Name", 220, True),
+                                      ("signer", "Signed by", 135, False), ("why", "Why flagged", 290, True)):
             self.tree.heading(c, text=label, command=lambda c=c: self.sort_by(c))
             self.tree.column(c, width=w, stretch=stretch, anchor="w")
         for s, col in SEV_COLORS.items():
@@ -238,7 +241,7 @@ class App(tk.Tk):
         self.detail.configure(state="disabled")
         pane.add(det, weight=1)
 
-        self.sort_col, self.sort_rev = "sev", False
+        self.sort_col, self.sort_rev = "priority", False
 
     def build_overview(self):
         ttk.Label(self.dashboard, text="Scan overview", style="Section.TLabel").pack(anchor="w")
@@ -251,7 +254,7 @@ class App(tk.Tk):
         for index, (title, color) in enumerate(colors.items()):
             name = f"Card{index}.Metric.TButton"
             style.configure(name, foreground=color)
-            button = ttk.Button(metrics, text=f"—\n{title}", style=name,
+            button = ttk.Button(metrics, text=f"—\n{title}", style=name, image=self.icons[("priority", "added", "changed", "absent", "remote", "coverage")[index]], compound="left",
                                 command=lambda choice=title: self.open_metric(choice))
             row, column = divmod(index, 3)
             metrics.columnconfigure(column, weight=1, uniform="metrics")
@@ -262,6 +265,18 @@ class App(tk.Tk):
         for label, action in (("Explain scan", self.explain_scan), ("Ollama settings", self.model_settings),
                               ("Redacted export", self.export_redacted), ("Settings backup", self.startup_workspace.settings_backup), ("Retry failed checks", self.retry_failed)):
             ttk.Button(actions, text=label, command=action).pack(side="left", padx=(0, 8))
+
+        sound_toggle = tk.BooleanVar(value=self.settings.get("sounds", False))
+        self.sound_toggle = sound_toggle
+
+        def toggle_sound():
+            self.settings["sounds"] = sound_toggle.get()
+            self.persist_settings()
+            if sound_toggle.get():
+                self.play_cue("complete")
+
+        ttk.Checkbutton(self.dashboard, text="Scan sounds", variable=sound_toggle,
+                        command=toggle_sound).pack(anchor="w", pady=12)
 
     def open_metric(self, choice):
         if choice == "Remote access":
@@ -579,9 +594,9 @@ class App(tk.Tk):
 
         table = ttk.Frame(frame)
         table.pack(fill="both", expand=True, pady=6)
-        columns = ("severity", "pid", "name", "path")
+        columns = ("priority", "flags", "severity", "pid", "name", "path")
         self.process_tree = ttk.Treeview(table, columns=columns, show="headings", selectmode="browse")
-        for column, title, width in zip(columns, ("Severity", "PID", "Name", "Executable"), (80, 70, 220, 650)):
+        for column, title, width in zip(columns, ("Priority", "Flags", "Severity", "PID", "Name", "Executable"), (65, 175, 80, 70, 200, 500)):
             self.process_tree.heading(column, text=title)
             self.process_tree.column(column, width=width, stretch=column == "path")
         scrollbar = ttk.Scrollbar(table, orient="vertical", command=self.process_tree.yview)
@@ -613,11 +628,11 @@ class App(tk.Tk):
 
     def load_process_rows(self, data: dict, live: bool) -> None:
         self.live_processes = live
-        self.process_rows = A.process_findings(data)
+        self.process_rows = sorted(A.process_findings(data), key=lambda f: -f.priority)
         self.process_tree.delete(*self.process_tree.get_children())
         for index, process in enumerate(self.process_rows):
             self.process_tree.insert("", "end", iid=str(index), tags=(process.severity,), values=(
-                process.severity, process.details.get("PID"), process.name, process.path
+                process.priority, ", ".join(process.flags), process.severity, process.details.get("PID"), process.name, process.path
             ))
         coverage = self.meta.get("ProcessCoverage", "Process inventory unavailable")
         self.process_status.set(f"{'Live snapshot' if live else 'Saved scan (view only)'} | {coverage}")
@@ -723,11 +738,23 @@ class App(tk.Tk):
     def _load_live_scan(self, path: Path, fresh_processes=True) -> None:
         self.finish_scan()
         self.load_file(path, live=fresh_processes, collected=True)
+        if self.scan_file == path:
+            self.play_cue("attention" if any(f.priority >= 70 for f in (*self.findings, *self.process_rows)) else "complete")
+
+    def play_cue(self, name):
+        if os.name == "nt" and self.settings.get("sounds", False):
+            import winsound
+            try:
+                winsound.PlaySound(str(A.APP_DIR / "assets" / (name + ".wav")),
+                                   winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+            except RuntimeError:
+                pass
 
     def _scan_failed(self, msg: str) -> None:
         self.finish_scan()
         self.status.set("Scan failed" if msg else "Scan cancelled")
         if msg:
+            self.play_cue("error")
             messagebox.showerror("Scan failed", msg, parent=self)
 
     def load_file(self, path: Path, live: bool = False, collected: bool = False) -> None:
@@ -803,6 +830,8 @@ class App(tk.Tk):
                 continue
             rows.append(f)
         keyf = {
+            "priority": lambda f: (-f.priority, f.name.lower()),
+            "flags": lambda f: (tuple(f.flags), -f.priority),
             "sev": lambda f: (A.SEV_RANK[f.severity], f.category, f.name.lower()),
             "new": lambda f: (not f.is_new, A.SEV_RANK[f.severity]),
             "cat": lambda f: (f.category, A.SEV_RANK[f.severity]),
@@ -815,7 +844,7 @@ class App(tk.Tk):
         self.tree.delete(*self.tree.get_children())
         for i, f in enumerate(rows):
             self.tree.insert("", "end", iid=str(i), tags=(f.severity,),
-                             values=(f.severity, "Absent" if change == "Absent" else self.changes.get(id(f), ("", None))[0] if f.is_new else "", f.category,
+                             values=(f.priority, ", ".join(f.flags), f.severity, "Absent" if change == "Absent" else self.changes.get(id(f), ("", None))[0] if f.is_new else "", f.category,
                                      f.name + (" · Reviewed" if fingerprint(f) in self.settings.get("notes", {}) else ""),
                                      f.signer or (f.sig if f.sig not in ("Valid", "") else ""),
                                      " | ".join(f.reasons)))

@@ -346,7 +346,7 @@ class StartupWorkspace:
         path = filedialog.asksaveasfilename(parent=self.app, initialfile="scanner-settings.json", defaultextension=".json")
         if not path:
             return
-        data = {key: self.app.settings[key] for key in ("model", "notes", "blocks") if key in self.app.settings}
+        data = {key: self.app.settings[key] for key in ("model", "notes", "blocks", "sounds") if key in self.app.settings}
         try:
             Path(path).write_text(json.dumps({"version": 1, "settings": data}, indent=2), encoding="utf-8")
         except OSError as exc:
@@ -361,8 +361,10 @@ class StartupWorkspace:
             if data["version"] != 1 or not isinstance(data["settings"], dict):
                 raise ValueError("Unsupported settings version")
             candidate = data["settings"]
-            if set(candidate) - {"model", "notes", "blocks"}:
+            if set(candidate) - {"model", "notes", "blocks", "sounds"}:
                 raise ValueError("Unknown setting")
+            if "sounds" in candidate and not isinstance(candidate["sounds"], bool):
+                raise ValueError("Invalid sound preference")
             model = candidate.get("model", "")
             if not isinstance(model, str) or "cloud" in model.casefold():
                 raise ValueError("Expected a local model name")
@@ -401,6 +403,7 @@ class StartupWorkspace:
                 messagebox.showerror("Import failed", str(exc), parent=window)
                 return
             self.app.settings = result
+            self.app.sound_toggle.set(result.get("sounds", False))
             if result.get("model"):
                 os.environ["SCANNER_OLLAMA_MODEL"] = result["model"]
             else:

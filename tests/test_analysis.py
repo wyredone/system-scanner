@@ -40,3 +40,10 @@ class ScannerTests(unittest.TestCase):
         merged = merge_retry(prior, fresh, sections)
         self.assertEqual(merged["Items"], [prior["Items"][0], fresh["Items"][0]])
         self.assertEqual(merged["Meta"]["Coverage"]["Drivers"], "Complete")
+
+    def test_priority_flags(self):
+        finding = Finding("High", "Task", "Demo", reasons=["File was modified after it was signed",
+            "Command line uses scripting", "Command line uses scripting"])
+        self.assertEqual(finding.flags, ["Signature mismatch", "Script behavior"])
+        self.assertEqual(finding.priority, 94)
+        self.assertEqual(Finding("Medium", "Coverage", "Tasks").priority, 0)

@@ -43,7 +43,7 @@ jobs:
       - name: Package scanner
         shell: powershell
         run: |
-          Compress-Archive -Path *.py,*.bat,README.md,user-guide.html,engine -DestinationPath system-scanner.zip
+          Compress-Archive -Path *.py,*.bat,README.md,user-guide.html,engine,assets -DestinationPath system-scanner.zip
       - uses: actions/upload-artifact@v4
         with:
           name: system-scanner-windows
