@@ -24,7 +24,13 @@ import analysis as A
 from process_control import stop_process
 from finding_ai import explain_finding
 
-SEV_COLORS = {"High": "#f8c9c4", "Medium": "#fde7b0", "Low": "#dbe9f7", "Info": "#ffffff"}
+BACKGROUND = "#0d141e"
+PANEL = "#162233"
+EDGE = "#2a3a50"
+TEXT = "#e8f1ff"
+MUTED = "#a2b5ce"
+ACCENT = "#55dacf"
+SEV_COLORS = {"High": "#492433", "Medium": "#473621", "Low": "#203a52", "Info": PANEL}
 
 
 def is_admin() -> bool:
@@ -65,22 +71,53 @@ class App(tk.Tk):
     # ------------------------------------------------------------ layout
     def _build(self) -> None:
         style = ttk.Style(self)
-        try:
-            style.theme_use("vista")
-        except tk.TclError:
-            pass
-        style.configure("Treeview", rowheight=22)
+        style.theme_use("clam")
+        self.configure(background=BACKGROUND)
+        self.option_add("*Toplevel.background", BACKGROUND)
+        self.option_add("*Text.background", BACKGROUND)
+        self.option_add("*Text.foreground", TEXT)
+        self.option_add("*Text.selectBackground", "#295266")
+        self.option_add("*TCombobox*Listbox.background", PANEL)
+        self.option_add("*TCombobox*Listbox.foreground", TEXT)
+        style.configure(".", background=BACKGROUND, foreground=TEXT, bordercolor=EDGE,
+                        lightcolor=EDGE, darkcolor=EDGE, troughcolor=BACKGROUND,
+                        fieldbackground=PANEL, selectbackground="#295266", selectforeground=TEXT,
+                        font=("Segoe UI", 10), focuscolor=ACCENT)
+        style.configure("TButton", background=PANEL, padding=(9, 6))
+        style.map("TButton", background=[("disabled", BACKGROUND), ("active", EDGE)],
+                  foreground=[("disabled", MUTED)])
+        style.configure("Primary.TButton", background=ACCENT, foreground=BACKGROUND)
+        style.map("Primary.TButton", background=[("disabled", PANEL), ("active", "#83efe5")],
+                  foreground=[("disabled", MUTED), ("!disabled", BACKGROUND)])
+        style.configure("TCheckbutton", indicatorbackground=PANEL)
+        style.map("TCheckbutton", indicatorbackground=[("selected", ACCENT)], background=[("active", PANEL)])
+        style.map("TCombobox", fieldbackground=[("readonly", PANEL)], foreground=[("readonly", TEXT)])
+        style.configure("TNotebook", borderwidth=0)
+        style.configure("TNotebook.Tab", padding=(18, 10), background=PANEL, foreground=MUTED)
+        style.map("TNotebook.Tab", foreground=[("selected", ACCENT)], background=[("selected", EDGE)])
+        style.configure("Treeview", rowheight=28, background=PANEL, fieldbackground=PANEL, borderwidth=0)
+        style.configure("Treeview.Heading", background=EDGE, padding=(6, 7))
+        style.map("Treeview.Heading", background=[("active", "#354b64")])
+        style.map("Treeview", background=[("selected", "#295266")], foreground=[("selected", "#ffffff")])
+        style.configure("Horizontal.TProgressbar", background=ACCENT)
+        style.configure("Status.TLabel", foreground=MUTED)
+        style.configure("Title.TLabel", font=("Segoe UI", 23, "bold"))
+        header = ttk.Frame(self, padding=(16, 12, 16, 4))
+        header.pack(fill="x")
+        ttk.Label(header, text="SYSTEM SCANNER", style="Title.TLabel").pack(side="left")
+        ttk.Label(header, text="ADMINISTRATOR" if is_admin() else "STANDARD ACCESS",
+                  style="Status.TLabel").pack(side="right")
 
         top = ttk.Frame(self, padding=(8, 8, 8, 4))
         top.pack(fill="x")
-        self.scan_btn = ttk.Button(top, text="Scan now", command=self.start_scan)
+        self.scan_btn = ttk.Button(top, text="Scan now", style="Primary.TButton", command=self.start_scan)
         self.scan_btn.pack(side="left")
-        self.admin_btn = ttk.Button(top, text="Restart as Administrator", command=self.on_admin)
+        self.admin_btn = ttk.Button(top, text="Run as admin", command=self.on_admin)
         self.admin_btn.pack(side="left", padx=(6, 0))
         if is_admin():
             self.admin_btn.state(["disabled"])
         ttk.Button(top, text="Open saved scan...", command=self.on_open).pack(side="left", padx=(6, 0))
-        ttk.Button(top, text="Export report (HTML)", command=self.on_export_html).pack(side="left", padx=(6, 0))
+        ttk.Button(top, text="Export HTML", command=self.on_export_html).pack(side="left", padx=(6, 0))
         ttk.Button(top, text="Export CSV", command=self.on_export_csv).pack(side="left", padx=(6, 0))
         ttk.Button(top, text="Scans folder", command=lambda: os.startfile(A.SCANS_DIR)).pack(side="left", padx=(6, 0))
         ttk.Button(top, text="User Guide", command=self.open_guide).pack(side="left", padx=6)
@@ -92,13 +129,13 @@ class App(tk.Tk):
         self.progress = ttk.Progressbar(status_row, mode="indeterminate", length=160)
         self.progress.pack(side="right")
         self.status = tk.StringVar(value="Ready")
-        ttk.Label(status_row, textvariable=self.status).pack(side="left")
+        ttk.Label(status_row, textvariable=self.status, style="Status.TLabel").pack(side="left")
 
         self.summary = tk.StringVar(value="")
         ttk.Label(self, textvariable=self.summary, padding=(10, 0), font=("Segoe UI", 10, "bold")).pack(fill="x")
 
         tabs = ttk.Notebook(self)
-        tabs.pack(fill="both", expand=True)
+        tabs.pack(fill="both", expand=True, padx=12, pady=8)
         findings_tab = ttk.Frame(tabs)
         processes_tab = ttk.Frame(tabs, padding=8)
         tabs.add(findings_tab, text="Persistence Findings")
@@ -164,7 +201,7 @@ class App(tk.Tk):
         self.help_tip(btns, "Finding evidence and AI",
                       "Review the scanner reasons and signature first. AI uses local Ollama and may "
                       "be wrong. VirusTotal opens a browser lookup for the selected file hash.")
-        self.detail = tk.Text(det, height=12, wrap="word", font=("Consolas", 10), relief="solid", borderwidth=1)
+        self.detail = tk.Text(det, height=12, wrap="word", font=("Consolas", 10), relief="flat", padx=10, pady=8)
         self.detail.pack(fill="both", expand=True)
         self.detail.configure(state="disabled")
         pane.add(det, weight=1)
@@ -261,6 +298,8 @@ class App(tk.Tk):
         self.process_tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         self.process_tree.pack(side="left", fill="both", expand=True)
+        for severity, color in SEV_COLORS.items():
+            self.process_tree.tag_configure(severity, background=color)
         self.process_tree.bind("<<TreeviewSelect>>", self.show_process)
         self.process_detail = tk.Text(frame, height=12, wrap="word", state="disabled")
         self.process_detail.pack(fill="x")
@@ -287,7 +326,7 @@ class App(tk.Tk):
         self.process_rows = A.process_findings(data)
         self.process_tree.delete(*self.process_tree.get_children())
         for index, process in enumerate(self.process_rows):
-            self.process_tree.insert("", "end", iid=str(index), values=(
+            self.process_tree.insert("", "end", iid=str(index), tags=(process.severity,), values=(
                 process.severity, process.details.get("PID"), process.name, process.path
             ))
         coverage = self.meta.get("ProcessCoverage", "Process inventory unavailable")
