@@ -26,13 +26,13 @@ from process_control import stop_process
 from finding_ai import explain_finding, finding_evidence, generate, installed_models
 from review_tools import read_settings, save_settings, fingerprint, redacted_report
 
-BACKGROUND = "#0d141e"
-PANEL = "#162233"
-EDGE = "#2a3a50"
-TEXT = "#e8f1ff"
-MUTED = "#a2b5ce"
-ACCENT = "#55dacf"
-SEV_COLORS = {"High": "#492433", "Medium": "#473621", "Low": "#203a52", "Info": PANEL}
+BACKGROUND = "#0b1020"
+PANEL = "#151e34"
+EDGE = "#334365"
+TEXT = "#f3f6ff"
+MUTED = "#aebedc"
+ACCENT = "#4cf3d3"
+SEV_COLORS = {"High": "#54243e", "Medium": "#4a351e", "Low": "#1a395f", "Info": PANEL}
 
 
 def is_admin() -> bool:
@@ -82,18 +82,19 @@ class App(tk.Tk):
         self.option_add("*Toplevel.background", BACKGROUND)
         self.option_add("*Text.background", BACKGROUND)
         self.option_add("*Text.foreground", TEXT)
-        self.option_add("*Text.selectBackground", "#295266")
+        self.option_add("*Text.selectBackground", "#334c86")
         self.option_add("*TCombobox*Listbox.background", PANEL)
         self.option_add("*TCombobox*Listbox.foreground", TEXT)
+        font = "Segoe UI" if sys.platform == "win32" else "DejaVu Sans"
         style.configure(".", background=BACKGROUND, foreground=TEXT, bordercolor=EDGE,
                         lightcolor=EDGE, darkcolor=EDGE, troughcolor=BACKGROUND,
-                        fieldbackground=PANEL, selectbackground="#295266", selectforeground=TEXT,
-                        font=("Segoe UI", 10), focuscolor=ACCENT)
+                        fieldbackground=PANEL, selectbackground="#334c86", selectforeground=TEXT,
+                        font=(font, 10), focuscolor=ACCENT)
         style.configure("TButton", background=PANEL, padding=(9, 6))
         style.map("TButton", background=[("disabled", BACKGROUND), ("active", EDGE)],
                   foreground=[("disabled", MUTED)])
         style.configure("Primary.TButton", background=ACCENT, foreground=BACKGROUND)
-        style.map("Primary.TButton", background=[("disabled", PANEL), ("active", "#83efe5")],
+        style.map("Primary.TButton", background=[("disabled", PANEL), ("active", "#a0ffeb")],
                   foreground=[("disabled", MUTED), ("!disabled", BACKGROUND)])
         style.configure("TCheckbutton", indicatorbackground=PANEL)
         style.map("TCheckbutton", indicatorbackground=[("selected", ACCENT)], background=[("active", PANEL)])
@@ -104,13 +105,17 @@ class App(tk.Tk):
         style.configure("Treeview", rowheight=28, background=PANEL, fieldbackground=PANEL, borderwidth=0)
         style.configure("Treeview.Heading", background=EDGE, padding=(6, 7))
         style.map("Treeview.Heading", background=[("active", "#354b64")])
-        style.map("Treeview", background=[("selected", "#295266")], foreground=[("selected", "#ffffff")])
+        style.map("Treeview", background=[("selected", "#334c86")], foreground=[("selected", "#ffffff")])
         style.configure("Horizontal.TProgressbar", background=ACCENT)
         style.configure("Status.TLabel", foreground=MUTED)
-        style.configure("Title.TLabel", font=("Segoe UI", 23, "bold"))
+        style.configure("Title.TLabel", font=(font, 25, "bold"))
+        style.configure("Section.TLabel", font=(font, 19, "bold"))
+        style.configure("Metric.TButton", background=PANEL, font=(font, 14, "bold"),
+                        padding=(20, 18), anchor="w", justify="left")
+        style.map("Metric.TButton", background=[("active", EDGE), ("focus", EDGE)])
         header = ttk.Frame(self, padding=(16, 12, 16, 4))
         header.pack(fill="x")
-        ttk.Label(header, text="SYSTEM SCANNER", style="Title.TLabel").pack(side="left")
+        ttk.Label(header, text="System Scanner", style="Title.TLabel").pack(side="left")
         ttk.Label(header, text="ADMINISTRATOR" if is_admin() else "STANDARD ACCESS",
                   style="Status.TLabel").pack(side="right")
 
@@ -171,23 +176,25 @@ class App(tk.Tk):
         self.cat_box = ttk.Combobox(filt, textvariable=self.cat_var, state="readonly", width=16, values=["All"])
         self.cat_box.pack(side="left")
         self.cat_box.bind("<<ComboboxSelected>>", lambda e: self.refresh())
-        ttk.Label(filt, text="   Search:").pack(side="left")
+        searchbar = ttk.Frame(findings_tab, padding=(8, 4))
+        searchbar.pack(fill="x")
+        ttk.Label(searchbar, text="Search  ").pack(side="left")
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *a: self.refresh())
-        ttk.Entry(filt, textvariable=self.search_var, width=28).pack(side="left")
+        ttk.Entry(searchbar, textvariable=self.search_var, width=28).pack(side="left")
         self.hide_ms = tk.BooleanVar(value=False)
-        ttk.Checkbutton(filt, text="Hide Microsoft-signed", variable=self.hide_ms, command=self.refresh).pack(side="left", padx=8)
+        ttk.Checkbutton(searchbar, text="Hide Microsoft-signed", variable=self.hide_ms, command=self.refresh).pack(side="left", padx=8)
         self.only_new = tk.BooleanVar(value=False)
-        ttk.Checkbutton(filt, text="New or changed", variable=self.only_new, command=self.refresh).pack(side="left")
+        ttk.Checkbutton(searchbar, text="New or changed", variable=self.only_new, command=self.refresh).pack(side="left")
 
         self.help_tip(filt, "Finding filters",
                       "High and Medium are review priorities. Info is hidden initially. "
                       "NEW compares category, name, path, and command against the previous saved scan.")
         ttk.Button(filt, text="Absent entries", command=self.show_absent).pack(side="left")
         self.change_filter = tk.StringVar(value="All changes")
-        changes = ttk.Combobox(findings_tab, textvariable=self.change_filter, state="readonly",
+        changes = ttk.Combobox(searchbar, textvariable=self.change_filter, state="readonly",
                                values=("All changes", "Added", "Changed", "Absent"), width=16)
-        changes.pack(anchor="w", padx=8)
+        changes.pack(side="left", padx=8)
         changes.bind("<<ComboboxSelected>>", lambda event: self.refresh())
         pane = ttk.PanedWindow(findings_tab, orient="vertical")
         pane.pack(fill="both", expand=True, padx=8, pady=(4, 8))
@@ -231,13 +238,21 @@ class App(tk.Tk):
         self.sort_col, self.sort_rev = "sev", False
 
     def build_overview(self):
-        ttk.Label(self.dashboard, text="Scan overview", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(self.dashboard, text="Scan overview", style="Section.TLabel").pack(anchor="w")
         metrics = ttk.Frame(self.dashboard)
-        metrics.pack(anchor="w", pady=16)
+        metrics.pack(fill="x", pady=(16, 18))
         self.metrics = {}
-        for title in ("High priority", "Added", "Changed", "Absent", "Remote access", "Incomplete checks"):
-            button = ttk.Button(metrics, text=title, command=lambda choice=title: self.open_metric(choice))
-            button.pack(side="left", padx=(0, 8))
+        colors = {"High priority": "#ff8aa7", "Added": ACCENT, "Changed": "#80baff",
+                  "Absent": "#bfcbe6", "Remote access": "#d0adff", "Incomplete checks": "#ffca79"}
+        style = ttk.Style(self)
+        for index, (title, color) in enumerate(colors.items()):
+            name = f"Card{index}.Metric.TButton"
+            style.configure(name, foreground=color)
+            button = ttk.Button(metrics, text=f"—\n{title}", style=name,
+                                command=lambda choice=title: self.open_metric(choice))
+            row, column = divmod(index, 3)
+            metrics.columnconfigure(column, weight=1, uniform="metrics")
+            button.grid(row=row, column=column, sticky="nsew", padx=(0, 10), pady=(0, 10))
             self.metrics[title] = button
         actions = ttk.Frame(self.dashboard)
         actions.pack(anchor="w")
@@ -313,7 +328,7 @@ class App(tk.Tk):
                   len(self.absent_entries), len(remote),
                   sum(str(v).startswith("Partial") for v in self.meta.get("Coverage", {}).values()))
         for (title, button), count in zip(self.metrics.items(), counts):
-            button.configure(text=f"{title}  {count}")
+            button.configure(text=f"{count}\n{title}")
 
     def review_note(self):
         from tkinter.simpledialog import askstring
