@@ -15,7 +15,7 @@ jobs:
       - name: Run collector and analyze real inventory
         shell: powershell
         run: |
-          python -c "import analysis; p=analysis.run_scan(print); d=analysis.load_scan(p); assert analysis.process_findings(d); assert d['Meta']['Coverage']; assert analysis.analyze(d); assert 'Network' in d; d['Meta']['Coverage']['Scheduled tasks']='Partial (test)'; retry=analysis.load_scan(analysis.run_scan(prior=d)); assert retry['Meta']['RetriedSections']==['Scheduled tasks']; assert retry['Network']==d['Network']"
+          python -c "import analysis; p=analysis.run_scan(print); d=analysis.load_scan(p); assert analysis.process_findings(d); assert d['Meta']['Coverage']; assert analysis.analyze(d); assert 'Network' in d; d['Meta']['Coverage']={k: 'Complete' for k in d['Meta']['Coverage']}; d['Meta']['Coverage']['Scheduled tasks']='Partial (test)'; retry=analysis.load_scan(analysis.run_scan(prior=d)); assert retry['Meta']['RetriedSections']==['Scheduled tasks']; assert retry['Network']==d['Network']"
       - name: Explain a synthetic finding with local Ollama
         shell: powershell
         env:
