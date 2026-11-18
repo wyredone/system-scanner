@@ -46,9 +46,9 @@ dd { margin: 0 0 .6rem; }
 </section>
 <section id="startup-actions">
 <h2>Disable, delete, restore, and block</h2>
-<p>Actions to change Windows apply to selected live scheduled tasks. Take a new full scan first. Permissions depend on the task. If Windows denies access, use Run as admin and scan again. The scanner checks that the complete task definition still matches the scan before acting.</p>
+<p>Actions to change Windows apply to selected live scheduled tasks and supported Registry Run entries. Take a new full scan first. Permissions depend on the task. If Windows denies access, use Run as admin and scan again. The scanner checks that the complete task definition still matches the scan before acting.</p>
 <p>Disable is reversible with Enable. Delete writes the task definition to scans/task-backups first. Restore task reads a trusted backup and registers the saved task only when the destination is vacant. A restored task can run automatically. Tasks that require a password or depend on accounts, programs, or folders unavailable on this PC may need Windows Task Scheduler.</p>
-<p>Block / Unblock disables a live scheduled task when necessary and saves a watch for that entry. For Registry and Startup folder entries, it saves a watch. A later scan shows Block alert if the watched entry is present and not verified disabled. Unblock removes the watch. Use Enable separately for a disabled task. Watches run at scan time and do not prevent executables from launching.</p>
+<p>Block / Unblock disables a live scheduled task when necessary and saves a watch for that entry. For standard Registry Run and RunOnce entries, it removes the value after saving a backup and adds a watch. Restore Run entry re-creates the backed-up value if the slot is vacant. Startup folder items support watches. A later scan shows Block alert if the watched entry is present and not verified disabled. Unblock removes the watch. Use Enable separately for a disabled task. Watches run at scan time and do not prevent executables from launching.</p>
 </section>
 <section id="settings-backup">
 <h2>Settings backup and restore</h2>

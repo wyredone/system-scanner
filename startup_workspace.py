@@ -11,6 +11,7 @@ import webbrowser
 
 import analysis as A
 from review_tools import save_settings
+from startup_entry_control import remove_run_entry, restore_run_entry
 
 CATEGORIES = {"RunKey", "StartupFolder", "Task"}
 
@@ -71,7 +72,8 @@ class StartupWorkspace:
             ("Explain", self.explain), ("Hash lookup", self.lookup),
             ("Disable", lambda: self.task_action("disable")), ("Enable", lambda: self.task_action("enable")),
             ("Delete", lambda: self.task_action("delete")), ("Restore task", self.restore),
-            ("Block / Unblock", self.block),
+            ("Restore Run entry", self.restore_run),
+            ("Block / Unblock", self.block), ("Block rules", self.block_rules),
         ]:
             self.button(actions, label, callback)
         self.help(actions, "startup-actions", "Windows changes require a fresh live task selection and confirmation. Blocking tracks an entry on future scans.")
@@ -186,6 +188,8 @@ class StartupWorkspace:
             del rules[key]
             self.app.persist_settings()
             self.compare()
+        elif row.category == "RunKey" and os.name == "nt":
+            self.change_run(row, "disable", block=True)
         elif row.category == "Task" and row.details.get("State") != "Disabled":
             self.task_action("disable", block=True)
         elif messagebox.askyesno("Track block rule", "Flag this entry when it appears in subsequent scans?", parent=self.app):
@@ -193,12 +197,76 @@ class StartupWorkspace:
             self.app.persist_settings()
             self.compare()
 
+    def block_rules(self):
+        window = tk.Toplevel(self.app)
+        window.title("Block rules")
+        panel = ttk.Frame(window, padding=12)
+        panel.pack(fill="both", expand=True)
+        rules = self.app.settings.setdefault("blocks", {})
+        keys = list(rules)
+        rows = tk.Listbox(panel, width=66, height=12)
+        rows.pack(fill="both", expand=True)
+        for key in keys:
+            rows.insert("end", rules[key])
+
+        def remove():
+            selected = rows.curselection()
+            if selected:
+                index = selected[0]
+                rules.pop(keys.pop(index), None)
+                rows.delete(index)
+                self.app.persist_settings()
+                self.compare()
+
+        self.button(panel, "Remove watch", remove)
+        self.help(panel, "startup-actions", "Removing a watch clears the scan alert. Restore or enable the Windows entry separately.")
+
     def can_edit(self):
         return (self.live and not self.app.busy and not self.active
                 and self.pickers[1].get() == "Current")
 
+    def change_run(self, row, action, block=False):
+        if action == "enable":
+            self.restore_run()
+            return
+        prompt = f"{action.title()} {row.name}? A local backup will be saved first.\n\n{row.command}"
+        if not messagebox.askyesno("Confirm startup change", prompt, parent=self.app):
+            return
+        try:
+            remove_run_entry(row.details.get("Key", ""), row.name, row.command)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Startup action failed", str(exc), parent=self.app)
+            return
+        if block:
+            self.app.settings.setdefault("blocks", {})[self.identity(row)] = row.name
+            self.app.persist_settings()
+        self.app.start_scan()
+
+    def restore_run(self):
+        if self.app.busy or self.active or os.name != "nt":
+            return
+        path = filedialog.askopenfilename(parent=self.app, initialdir=A.SCANS_DIR / "startup-backups",
+                                           filetypes=[("Run entry backups", "*.json")])
+        if not path:
+            return
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+            if not all(isinstance(payload[k], str) for k in ("location", "name", "value")):
+                raise ValueError("Invalid Registry backup")
+            prompt = f"Restore {payload['name']} to {payload['location']}?\n\n{payload['value']}"
+            if not messagebox.askyesno("Restore startup entry", prompt, parent=self.app):
+                return
+            restore_run_entry(payload)
+        except (OSError, TypeError, ValueError, KeyError) as exc:
+            messagebox.showerror("Restore failed", str(exc), parent=self.app)
+        else:
+            self.app.start_scan()
+
     def task_action(self, action, block=False):
         _, row = self.current_row()
+        if self.can_edit() and row and row.category == "RunKey" and os.name == "nt":
+            self.change_run(row, action)
+            return
         if not self.can_edit() or not row or row.category != "Task" or not row.details.get("TaskDigest"):
             messagebox.showinfo("Live task required", "Select a scheduled task from a fresh live scan.", parent=self.app)
             return

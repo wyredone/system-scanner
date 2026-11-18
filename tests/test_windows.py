@@ -80,3 +80,37 @@ class WindowsTests(unittest.TestCase):
             self.assertIn("<Actions", xml())
         finally:
             powershell(f"Unregister-ScheduledTask -TaskName '{name}' -Confirm:$false -ErrorAction SilentlyContinue")
+
+    def test_run_entry_backup_restore(self):
+        import json
+        import tempfile
+        import uuid
+        import winreg
+        from pathlib import Path
+        import analysis
+        from startup_entry_control import PREFIX, remove_run_entry, restore_run_entry
+
+        key = PREFIX + r"\Run"
+        location = "HKCU:\\" + key
+        name = "SystemScanner-Test-" + uuid.uuid4().hex
+        value = "scanner-fixture.exe"
+        access = winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, key, access=access) as handle:
+            try:
+                winreg.SetValueEx(handle, name, 0, winreg.REG_SZ, value)
+                with self.assertRaises(ValueError):
+                    remove_run_entry(location, name, "different")
+                with tempfile.TemporaryDirectory() as folder, patch.object(analysis, "SCANS_DIR", Path(folder)):
+                    backup = remove_run_entry(location, name, value)
+                    with self.assertRaises(FileNotFoundError):
+                        winreg.QueryValueEx(handle, name)
+                    payload = json.loads(backup.read_text(encoding="utf-8"))
+                    restore_run_entry(payload)
+                    self.assertEqual(winreg.QueryValueEx(handle, name), (value, winreg.REG_SZ))
+                    with self.assertRaises(ValueError):
+                        restore_run_entry(payload)
+            finally:
+                try:
+                    winreg.DeleteValue(handle, name)
+                except FileNotFoundError:
+                    pass
