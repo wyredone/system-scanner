@@ -8,6 +8,7 @@ Start with "Scan Computer.bat" (normal) or "Scan Computer (Admin).bat" (complete
 """
 from __future__ import annotations
 
+import re
 import ctypes
 import json
 import os
@@ -489,12 +490,16 @@ class App(tk.Tk):
             messagebox.showerror("Local Ollama", response, parent=self)
             return
         dialog = tk.Toplevel(self)
-        dialog.title("Finding Explanation")
-        dialog.geometry("700x470")
-        ttk.Label(dialog, text=f"{name} | {model}", wraplength=660,
-                  padding=10).pack(fill="x")
-        ttk.Label(dialog, text="AI-generated interpretation. Verify against the recorded evidence.",
-                  padding=(10, 0)).pack(fill="x")
+        dialog.title("AI explanation")
+        dialog.geometry("760x570")
+        dialog.minsize(420, 320)
+        family = "Segoe UI" if sys.platform == "win32" else "DejaVu Sans"
+        header = ttk.Frame(dialog, padding=(20, 16, 20, 8))
+        header.pack(fill="x")
+        ttk.Label(header, text=f"Local AI  ·  {model}", foreground=ACCENT).pack(anchor="w")
+        title = ttk.Label(header, text=name, font=(family, 17, "bold"), wraplength=680)
+        title.pack(anchor="w", pady=(4, 0))
+        header.bind("<Configure>", lambda event: title.configure(wraplength=max(200, event.width - 40)))
         if evidence:
             by_label = {f"#{index + 1}  {finding.category} | {finding.name}": finding
                         for index, finding in evidence}
@@ -513,14 +518,49 @@ class App(tk.Tk):
                     messagebox.showinfo("Recorded finding", item.as_text(), parent=dialog)
 
             sources.bind("<<ComboboxSelected>>", show_source)
-        body = ttk.Frame(dialog, padding=10)
+        footer = ttk.Frame(dialog, padding=(16, 6, 16, 10))
+        footer.pack(side="bottom", fill="x")
+        ttk.Label(footer, text="Verify AI suggestions against scan evidence.", foreground=MUTED).pack(side="left")
+        ttk.Button(footer, text="Close", command=dialog.destroy).pack(side="right")
+        dialog.bind("<Escape>", lambda _: dialog.destroy())
+        body = ttk.Frame(dialog, padding=(16, 5, 16, 3))
         body.pack(fill="both", expand=True)
-        content = tk.Text(body, wrap="word")
+        content = tk.Text(body, wrap="word", font=(family, 11), padx=18, pady=10,
+                          background=PANEL, foreground=TEXT, relief="flat", borderwidth=0,
+                          spacing2=3, spacing3=5)
+        content.tag_configure("heading", foreground=ACCENT, font=(family, 13, "bold"), spacing1=10)
+        content.tag_configure("bullet", lmargin1=2, lmargin2=20)
+        content.tag_configure("strong", font=(family, 11, "bold"))
         scrollbar = ttk.Scrollbar(body, orient="vertical", command=content.yview)
         content.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         content.pack(side="left", fill="both", expand=True)
-        content.insert("1.0", response)
+        for line in response.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            heading = re.match(
+                r"^(?:#{1,6}\s*|\*\*)?(Why it was flagged|What is uncertain|What to verify|"
+                r"Scan priorities|Changes|Incomplete checks)\b[:*\s]*(.*)$", line, re.I)
+            if heading:
+                content.insert("end", heading[1] + "\n", "heading")
+                line = heading[2]
+                if not line:
+                    continue
+            elif line.startswith("#") and re.match(r"^#{1,6}\s", line):
+                content.insert("end", line.lstrip("# ").strip("*") + "\n", "heading")
+                continue
+            elif re.fullmatch(r"\*\*[^*]+\*\*[: ]*", line):
+                content.insert("end", line.strip("*: ") + "\n", "heading")
+                continue
+            bullet = re.match(r"^[-*•]\s+", line)
+            tags = ("bullet",) if bullet else ()
+            if bullet:
+                content.insert("end", "•  ", tags)
+                line = line[bullet.end():]
+            for index, part in enumerate(re.split(r"\*\*(.+?)\*\*", line)):
+                content.insert("end", part, tags + (("strong",) if index % 2 else ()))
+            content.insert("end", "\n", tags)
         content.configure(state="disabled")
 
     def _build_process_tab(self, frame) -> None:
