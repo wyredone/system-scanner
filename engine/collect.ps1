@@ -328,7 +328,7 @@ foreach ($tv in "${env:ProgramFiles}\TeamViewer\Connections_incoming.txt", "${en
 $anydeskUnattended = $false
 $sysconf = "$env:ProgramData\AnyDesk\system.conf"
 if (Test-Path -LiteralPath $sysconf) {
-    $anydeskUnattended = [bool](Select-String -LiteralPath $sysconf -Pattern '_unattended_access\.pwd=' -Quiet)
+    $anydeskUnattended = [bool](Select-String -LiteralPath $sysconf -Pattern '_unattended_access\.pwd=\s*\S' -Quiet)
 }
 
 # ---------- running processes ----------

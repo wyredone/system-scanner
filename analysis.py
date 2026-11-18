@@ -15,6 +15,7 @@ import ntpath
 import os
 import re
 import subprocess
+import tempfile
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -332,35 +333,47 @@ def analyze(data: dict) -> list[Finding]:
 def run_scan(progress=None) -> Path:
     """Run the PowerShell collector. Returns the path of the saved raw scan JSON."""
     SCANS_DIR.mkdir(exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")
     out = SCANS_DIR / f"{os.environ.get('COMPUTERNAME', 'PC')}_{stamp}.json"
     flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
-    proc = subprocess.Popen(
-        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ENGINE), "-OutFile", str(out)],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-        creationflags=flags)
-    tail = []
-    for line in proc.stdout:
-        line = line.strip()
-        if line.startswith("PROGRESS|"):
-            if progress:
-                progress(line.split("|", 1)[1])
-        elif line:
-            tail.append(line)
-    proc.wait()
-    if proc.returncode != 0 or not out.exists():
-        raise RuntimeError("Scan failed:\n" + "\n".join(tail[-20:]))
+    with tempfile.TemporaryDirectory(dir=SCANS_DIR) as staging:
+        pending = Path(staging) / "scan.json"
+        proc = subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ENGINE), "-OutFile", str(pending)],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+            creationflags=flags)
+        tail = []
+        for line in proc.stdout:
+            line = line.strip()
+            if line.startswith("PROGRESS|"):
+                if progress:
+                    progress(line.split("|", 1)[1])
+            elif line:
+                tail.append(line)
+        proc.wait()
+        if proc.returncode != 0 or not pending.exists():
+            raise RuntimeError("Scan failed:\n" + "\n".join(tail[-20:]))
+        load_scan(pending)
+        pending.replace(out)
     return out
 
 
 def load_scan(path: Path) -> dict:
-    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    if not isinstance(data, dict) or not isinstance(data.get("Meta"), dict):
+        raise ValueError("Missing scanner metadata")
+    items = data.get("Items")
+    if isinstance(items, dict):
+        items = [items]
+    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        raise ValueError("Invalid scanner inventory")
+    return data
 
 
 def previous_scan(current: Path) -> Path | None:
     """Most recent earlier scan of the same computer."""
     computer = current.name.rsplit("_", 2)[0]
-    older = sorted(p for p in SCANS_DIR.glob(f"{computer}_*.json") if p.name < current.name)
+    older = sorted(p for p in SCANS_DIR.glob(f"{computer}_*.json") if p.name < current.name and p.name.rsplit("_", 2)[0] == computer)
     return older[-1] if older else None
 
 

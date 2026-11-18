@@ -15,8 +15,31 @@ jobs:
       - name: Run collector and analyze real inventory
         shell: powershell
         run: |
-          ./engine/collect.ps1 -OutFile "$env:RUNNER_TEMP/inventory.json"
-          python -c "import analysis,os,pathlib; d=analysis.load_scan(pathlib.Path(os.environ['RUNNER_TEMP'])/'inventory.json'); assert analysis.process_findings(d); assert d['Meta']['Coverage']; assert analysis.analyze(d)"
+          python -c "import analysis; p=analysis.run_scan(print); d=analysis.load_scan(p); assert analysis.process_findings(d); assert d['Meta']['Coverage']; assert analysis.analyze(d)"
+      - name: Explain a synthetic finding with local Ollama
+        shell: powershell
+        env:
+          SCANNER_OLLAMA_MODEL: smollm2:135m
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'ollama.zip'
+          curl.exe --fail --location --retry 2 https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip -o $zip
+          if ($LASTEXITCODE) { throw 'Ollama download failed' }
+          $folder = Join-Path $env:RUNNER_TEMP 'ollama-test'
+          Expand-Archive $zip $folder
+          $exe = (Get-ChildItem $folder -Recurse -Filter ollama.exe | Select-Object -First 1).FullName
+          $server = Start-Process $exe -ArgumentList 'serve' -PassThru
+          try {
+            for ($attempt=0; $attempt -lt 30; $attempt++) {
+              try { Invoke-RestMethod http://127.0.0.1:11434/api/tags | Out-Null; break } catch { Start-Sleep 1 }
+            }
+            & $exe pull $env:SCANNER_OLLAMA_MODEL
+            if ($LASTEXITCODE) { throw 'Test model unavailable' }
+            python -c "from analysis import Finding; from finding_ai import explain_finding; model, text = explain_finding(Finding('Medium','Task','CI',reasons=['Signature unknown'])); assert text.strip()"
+            if ($LASTEXITCODE) { throw 'Local explanation failed' }
+          } finally {
+            if (!$server.HasExited) { $server.Kill() }
+          }
       - name: Package scanner
         shell: powershell
         run: |
