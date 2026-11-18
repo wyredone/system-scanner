@@ -69,7 +69,7 @@ def finding_evidence(finding):
     return evidence
 
 
-def generate(evidence, instruction):
+def generate(evidence, instruction, *, max_tokens=400):
     model = os.environ.get("SCANNER_OLLAMA_MODEL", DEFAULT_MODEL).strip()
     if not model or "cloud" in model.casefold():
         raise RuntimeError("Set SCANNER_OLLAMA_MODEL to the name of an installed local model.")
@@ -89,7 +89,7 @@ def generate(evidence, instruction):
         "system": instruction,
         "prompt": "Explain this scanner evidence JSON:\n" + json.dumps(evidence),
         "stream": False,
-        "options": {"temperature": 0.2, "num_predict": 400},
+        "options": {"temperature": 0.2, "num_predict": max_tokens},
     }).encode("utf-8")
     data = _request("POST", "/api/generate", body, timeout=90)
     result = data.get("response")
