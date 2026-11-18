@@ -120,7 +120,6 @@ def analyze_item(it: dict) -> Finding:
                 sha256=it.get("SHA256") or "", company=it.get("Company") or "", details=details)
     sev = "Info"
     reasons = f.reasons
-    trusted_ms = f.microsoft_signed and bool(WINDOWS_DIR.match(path))
     signed_ok = sig == "Valid"
     in_user_dir = bool(USER_WRITABLE.search(path))
     base = ntpath.basename(path).lower()
@@ -130,7 +129,7 @@ def analyze_item(it: dict) -> Finding:
         sev = _bump(sev, "High"); reasons.append(f"Uses a Windows system file name ({base}) outside C:\\Windows")
     if MASQUERADE.search(text):
         sev = _bump(sev, "High"); reasons.append("Name imitates a Windows system process")
-    if SUSPICIOUS_CMD.search(cmd) and not trusted_ms:
+    if SUSPICIOUS_CMD.search(cmd):
         sev = _bump(sev, "High" if (not signed_ok or in_user_dir) else "Medium")
         reasons.append("Command line uses scripting, encoding, hidden windows or downloads (common malware tricks)")
     if cat in ("IFEO", "AppCertDll"):
@@ -192,6 +191,10 @@ def _parse_when(s: str) -> datetime | None:
 def analyze_global(data: dict) -> list[Finding]:
     out: list[Finding] = []
     meta = data.get("Meta") or {}
+
+    for section, status in (meta.get("Coverage") or {}).items():
+        partial = str(status).startswith("Partial")
+        out.append(Finding("Medium" if partial else "Info", "Coverage", section, reasons=[status]))
 
     # Antivirus
     av = data.get("Antivirus") or []
@@ -355,13 +358,22 @@ def previous_scan(current: Path) -> Path | None:
     return older[-1] if older else None
 
 
+def comparison_state(f: Finding) -> tuple:
+    fields = ("StartMode", "State", "Sessions", "Last", "Enabled", "UpToDate")
+    return (f.sha256, f.sig, f.signer, *(f.details.get(k) for k in fields))
+
+
 def mark_new(findings: list[Finding], baseline: dict | None) -> int:
     if not baseline:
         return 0
-    old_keys = {f.key for f in analyze(baseline)}
+    old = {}
+    for prior in analyze(baseline):
+        old.setdefault(prior.key, set()).add(comparison_state(prior))
     n = 0
     for f in findings:
-        if f.key not in old_keys:
+        if comparison_state(f) not in old.get(f.key, set()):
+            if f.key in old:
+                f.reasons.append("Changed since baseline")
             f.is_new = True
             n += 1
     return n

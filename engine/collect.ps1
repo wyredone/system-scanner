@@ -88,7 +88,16 @@ $meta = [ordered]@{
 }
 
 # ---------- services ----------
-Say 'Services'
+$coverage = [ordered]@{}
+function Start-Section([string]$name) {
+    if ($script:section) {
+        $coverage[$script:section] = if ($Error.Count) { "Partial ($($Error.Count) collection errors)" } else { 'No errors recorded' }
+    }
+    $Error.Clear()
+    $script:section = $name
+    Say $name
+}
+Start-Section 'Services'
 $svcs = @(Get-CimInstance Win32_Service)
 $i = 0
 foreach ($s in $svcs) {
@@ -115,7 +124,7 @@ foreach ($s in $svcs) {
 }
 
 # ---------- drivers (non-Microsoft only, to keep it short) ----------
-Say 'Drivers'
+Start-Section 'Drivers'
 foreach ($d in Get-CimInstance Win32_SystemDriver) {
     $p = Get-ExePath ([string]$d.PathName)
     $f = Get-FileFacts $p
@@ -126,7 +135,7 @@ foreach ($d in Get-CimInstance Win32_SystemDriver) {
 }
 
 # ---------- registry Run keys ----------
-Say 'Registry startup keys'
+Start-Section 'Registry startup keys'
 $runKeys = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
@@ -155,7 +164,7 @@ foreach ($n in 'Load', 'Run') {
 }
 
 # ---------- Winlogon / AppInit / IFEO / other hijack points ----------
-Say 'Hijack points (Winlogon, AppInit, IFEO)'
+Start-Section 'Hijack points (Winlogon, AppInit, IFEO)'
 $hijack = [ordered]@{}
 $wl = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 $wlu = Get-ItemProperty 'HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
@@ -197,7 +206,7 @@ if ($acd) {
 }
 
 # ---------- startup folders ----------
-Say 'Startup folders'
+Start-Section 'Startup folders'
 $shell = New-Object -ComObject WScript.Shell
 foreach ($f in "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup",
                "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup") {
@@ -213,7 +222,7 @@ foreach ($f in "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup",
 }
 
 # ---------- scheduled tasks ----------
-Say 'Scheduled tasks'
+Start-Section 'Scheduled tasks'
 $tasks = @(Get-ScheduledTask)
 $i = 0
 foreach ($t in $tasks) {
@@ -239,7 +248,7 @@ foreach ($t in $tasks) {
 }
 
 # ---------- WMI event subscriptions ----------
-Say 'WMI subscriptions'
+Start-Section 'WMI subscriptions'
 $wmi = @()
 foreach ($c in Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer) {
     $wmi += [ordered]@{ Type = 'CommandLineConsumer'; Name = $c.Name; Payload = "$($c.ExecutablePath) $($c.CommandLineTemplate)".Trim() }
@@ -255,7 +264,7 @@ foreach ($c in Get-CimInstance -Namespace root\subscription -ClassName __FilterT
 }
 
 # ---------- security products ----------
-Say 'Antivirus status'
+Start-Section 'Antivirus status'
 $av = @()
 foreach ($p in Get-CimInstance -Namespace root\SecurityCenter2 -ClassName AntiVirusProduct) {
     $st = [int]$p.productState
@@ -273,7 +282,7 @@ $defender = if ($mp) {
 } else { [ordered]@{ Available = $false } }
 
 # ---------- remote access tools & session history ----------
-Say 'Remote access history'
+Start-Section 'Remote access history'
 function Read-TextAnyEncoding([string]$path) {
     $bytes = [IO.File]::ReadAllBytes($path)
     if ($bytes.Length -ge 2 -and (($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) -or ($bytes.Length -gt 3 -and $bytes[1] -eq 0))) {
@@ -311,7 +320,7 @@ if (Test-Path -LiteralPath $sysconf) {
 }
 
 # ---------- running processes ----------
-Say 'Running processes'
+Start-Section 'Running processes'
 $processCoverage = 'Complete'
 try {
     $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
@@ -330,7 +339,8 @@ try {
 $meta['ProcessCoverage'] = $processCoverage
 
 # ---------- write ----------
-Say 'Writing results'
+Start-Section 'Writing results'
+$meta['Coverage'] = $coverage
 $result = [ordered]@{
     Meta = $meta; Items = $items; Hijack = $hijack; Wmi = $wmi
     Antivirus = $av; Defender = $defender

@@ -125,7 +125,7 @@ class App(tk.Tk):
         self.hide_ms = tk.BooleanVar(value=False)
         ttk.Checkbutton(filt, text="Hide Microsoft-signed", variable=self.hide_ms, command=self.refresh).pack(side="left", padx=8)
         self.only_new = tk.BooleanVar(value=False)
-        ttk.Checkbutton(filt, text="Only NEW since last scan", variable=self.only_new, command=self.refresh).pack(side="left")
+        ttk.Checkbutton(filt, text="New or changed", variable=self.only_new, command=self.refresh).pack(side="left")
 
         self.help_tip(filt, "Finding filters",
                       "High and Medium are review priorities. Info is hidden initially. "
@@ -371,12 +371,29 @@ class App(tk.Tk):
         prev = None
         if self.scan_file.parent.resolve() == A.SCANS_DIR.resolve():
             prev = A.previous_scan(self.scan_file)
-        n_new = A.mark_new(self.findings, A.load_scan(prev) if prev else None)
+        try:
+            baseline = A.load_scan(prev) if prev else None
+        except (OSError, ValueError):
+            baseline = None
+            messagebox.showwarning("Baseline unavailable", "Previous scan could not be read. Showing current results.")
+        n_new = A.mark_new(self.findings, baseline)
         cats = sorted({f.category for f in self.findings})
         self.cat_box.configure(values=["All"] + cats)
         counts = {s: sum(1 for f in self.findings if f.severity == s) for s in A.SEVERITIES}
-        new_txt = (f"   |   {n_new} new since {prev.stem.rsplit('_', 2)[1]}-{prev.stem.rsplit('_', 1)[1][:4]}"
+        new_txt = (f"   |   {n_new} new or changed since {prev.stem.rsplit('_', 2)[1]}-{prev.stem.rsplit('_', 1)[1][:4]}"
                    if prev else "   |   first scan of this PC (next scan will show what changed)")
+        if baseline:
+            current_keys = {f.key for f in self.findings}
+            absent = sum(f.key not in current_keys for f in A.analyze(baseline))
+            new_txt += f" | {absent} prior entries absent"
+            if baseline.get("Meta", {}).get("Admin") != self.meta.get("Admin"):
+                new_txt += " | Scan privileges differ"
+        elif prev:
+            new_txt = " | Comparison unavailable"
+        coverage = self.meta.get("Coverage") or {}
+        incomplete = sum(str(status).startswith("Partial") for status in coverage.values())
+        if incomplete:
+            new_txt += f" | INCOMPLETE: {incomplete} sections reported errors"
         self.summary.set(
             f"{self.meta.get('Computer', '?')}   |   scanned {self.meta.get('ScanTime', '')}   |   "
             f"{'Administrator' if self.meta.get('Admin') else 'NOT admin (partial)'}   |   "
