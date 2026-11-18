@@ -38,21 +38,18 @@ def _request(method, route, body=None, timeout=10):
         conn.close()
 
 
-def explain_finding(finding):
-    model = os.environ.get("SCANNER_OLLAMA_MODEL", DEFAULT_MODEL).strip()
-    if not model or "cloud" in model.casefold():
-        raise RuntimeError("Set SCANNER_OLLAMA_MODEL to the name of an installed local model.")
-    models = _request("GET", "/api/tags").get("models") or []
-    installed = any(
-        isinstance(item, dict)
-        and model in (item.get("model"), item.get("name"))
-        and isinstance(item.get("size"), int) and item["size"] > 0
-        and not item.get("remote_model") and not item.get("remote_host")
-        for item in models
-    )
-    if not installed:
-        raise RuntimeError(f"Local model {model} is missing. Install it in Ollama or set SCANNER_OLLAMA_MODEL.")
+def installed_models():
+    return sorted({item["name"] for item in _request("GET", "/api/tags").get("models", [])
+                   if isinstance(item.get("name"), str) and item.get("size", 0) > 0
+                   and "cloud" not in item["name"].casefold()
+                   and not item.get("remote_model") and not item.get("remote_host")})
 
+
+def explain_finding(finding):
+    return generate(finding_evidence(finding), SYSTEM_PROMPT)
+
+
+def finding_evidence(finding):
     # Omit command lines, account names, remote IDs, hashes, and full user paths.
     evidence = {
         "category": finding.category[:100],
@@ -69,9 +66,27 @@ def explain_finding(finding):
             reason for reason in evidence["scanner_reasons"]
             if not reason.startswith(("Defender is off because", "Not signed by a trusted publisher"))
         ]
+    return evidence
+
+
+def generate(evidence, instruction):
+    model = os.environ.get("SCANNER_OLLAMA_MODEL", DEFAULT_MODEL).strip()
+    if not model or "cloud" in model.casefold():
+        raise RuntimeError("Set SCANNER_OLLAMA_MODEL to the name of an installed local model.")
+    models = _request("GET", "/api/tags").get("models") or []
+    installed = any(
+        isinstance(item, dict)
+        and model in (item.get("model"), item.get("name"))
+        and isinstance(item.get("size"), int) and item["size"] > 0
+        and not item.get("remote_model") and not item.get("remote_host")
+        for item in models
+    )
+    if not installed:
+        raise RuntimeError(f"Local model {model} is missing. Install it in Ollama or set SCANNER_OLLAMA_MODEL.")
+
     body = json.dumps({
         "model": model,
-        "system": SYSTEM_PROMPT,
+        "system": instruction,
         "prompt": "Explain this scanner evidence JSON:\n" + json.dumps(evidence),
         "stream": False,
         "options": {"temperature": 0.2, "num_predict": 400},

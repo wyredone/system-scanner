@@ -71,6 +71,13 @@ dd { margin: 0 0 .6rem; }
 <p>Reports are saved under <code>scans</code>. <strong>New or changed</strong> shows entries with a new category, name, path, or command combination. The comparison also checks the file hash, signature, service or task state, and remote-session count and time. Coverage rows show section-level collection errors. Optional Windows components can be absent.</p>
 <p>Use <strong>Export report (HTML)</strong> for browser viewing or <strong>Export CSV</strong> for spreadsheets. Review exported reports for private information before sharing.</p>
 </section>
+<section>
+<h2>Review a scan from Overview</h2>
+<p>Select a count to open matching records. The comparison filter shows added, changed, or absent entries. A changed entry includes its prior evidence. Keep a local review note from the findings toolbar. A different command, signature, hash, or tracked state calls for a fresh review.</p>
+<p>Network shows listening and established TCP endpoints and bound UDP endpoints. Process ownership comes from the scan snapshot. Remote Access combines local log records, detected tools, running processes, and the AnyDesk unattended-access indicator.</p>
+<p>Ollama settings lists installed local models. Explain scan sends a bounded set of finding summaries to the selected model. Use the evidence selector to open cited findings.</p>
+<p>Redacted export previews an inventory by severity and category. Names, paths, addresses, arguments, and free text are omitted. Cancel ends an in-progress collection. Retry failed checks refreshes incomplete sections and any required process or service data. The resulting scan also contains records from the original collection.</p>
+</section>
 </main>
 </body>
 </html>

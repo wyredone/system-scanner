@@ -23,3 +23,9 @@ class ReportTests(unittest.TestCase):
             with patch.object(finding_ai, "_request", side_effect=replies) as request:
                 self.assertEqual(finding_ai.explain_finding(finding)[1], "Review signature.")
                 self.assertNotIn(b"private-command", request.call_args.args[2])
+
+    def test_redacted_export_excludes_untrusted_text(self):
+        from review_tools import redacted_report
+        finding = analysis.Finding("High", "Task", "Private name", command="private-command",
+                                   reasons=["private path"])
+        self.assertEqual(redacted_report([finding]), "Entry 001 | High | Task | Current")

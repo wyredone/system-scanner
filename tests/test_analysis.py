@@ -18,3 +18,25 @@ class ScannerTests(unittest.TestCase):
         item = dict(Category="Task", Name="Example", Details={
             "PayloadPath": "sample.dll", "PayloadSignature": "HashMismatch"})
         self.assertEqual(analyze_item(item).severity, "High")
+
+    def test_changed_command_and_absent(self):
+        from analysis import compare_findings
+        prior = {"Meta": {"Admin": True}, "Items": [{"Category": "Task", "Name": "Job", "Command": "old"},
+                           {"Category": "Task", "Name": "Former"}]}
+        row = Finding("Info", "Task", "Job", command="new")
+        changes, absent = compare_findings([row], prior)
+        self.assertEqual(changes[id(row)][0], "Changed")
+        self.assertEqual(changes[id(row)][1].command, "old")
+        self.assertEqual([item.name for item in absent], ["Former"])
+
+    def test_retry_preserves_unrelated_sections(self):
+        from analysis import merge_retry, retry_sections
+        prior = {"Meta": {"Coverage": {"Network activity": "Partial", "Drivers": "Complete"}},
+                 "Items": [{"Section": "Drivers"}, {"Section": "Running processes"}]}
+        fresh = {"Meta": {"Coverage": {"Network activity": "Complete"}},
+                 "Items": [{"Section": "Running processes", "Name": "Current"}], "Network": []}
+        sections = retry_sections(prior)
+        self.assertIn("Services", sections)
+        merged = merge_retry(prior, fresh, sections)
+        self.assertEqual(merged["Items"], [prior["Items"][0], fresh["Items"][0]])
+        self.assertEqual(merged["Meta"]["Coverage"]["Drivers"], "Complete")

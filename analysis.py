@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -330,31 +331,89 @@ def analyze(data: dict) -> list[Finding]:
 
 
 # ---------------------------------------------------------------- scanning / storage
-def run_scan(progress=None) -> Path:
-    """Run the PowerShell collector. Returns the path of the saved raw scan JSON."""
+class ScanCancelled(RuntimeError):
+    pass
+
+
+def retry_sections(data):
+    sections = {name for name, status in (data["Meta"].get("Coverage") or {}).items()
+                if str(status).startswith("Partial")}
+    if sections & {"Services", "Running processes", "Network activity"}:
+        sections.update(("Services", "Running processes", "Network activity"))
+    return sections
+
+
+def merge_retry(prior, fresh, sections):
+    groups = {
+        "Hijack points (Winlogon, AppInit, IFEO)": ("Hijack",),
+        "WMI subscriptions": ("Wmi",),
+        "Antivirus status": ("Antivirus", "Defender"),
+        "Remote access history": ("RemoteSessions", "AnyDeskUnattended"),
+        "Network activity": ("Network",),
+    }
+    result = {**prior, "Items": [row for row in prior["Items"] if row.get("Section") not in sections]
+              + fresh["Items"]}
+    for section in sections:
+        for field in groups.get(section, ()):
+            result[field] = fresh.get(field)
+    result["Meta"] = {**fresh["Meta"], "Coverage": {
+        **prior["Meta"]["Coverage"], **fresh["Meta"]["Coverage"]},
+        "RetriedSections": sorted(sections), "OriginalScanTime": prior["Meta"].get(
+            "OriginalScanTime", prior["Meta"].get("ScanTime"))}
+    if "Running processes" not in sections:
+        result["Meta"]["ProcessCoverage"] = prior["Meta"].get("ProcessCoverage")
+    return result
+
+
+def run_scan(progress=None, cancel=None, prior=None) -> Path:
+    """Run the collector, optionally refreshing failed sections in a prior local scan."""
     SCANS_DIR.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")
     out = SCANS_DIR / f"{os.environ.get('COMPUTERNAME', 'PC')}_{stamp}.json"
-    flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+    flags = 0x08000000 if sys.platform == "win32" else 0
     with tempfile.TemporaryDirectory(dir=SCANS_DIR) as staging:
         pending = Path(staging) / "scan.json"
-        proc = subprocess.Popen(
-            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ENGINE), "-OutFile", str(pending)],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-            creationflags=flags)
-        tail = []
-        for line in proc.stdout:
-            line = line.strip()
-            if line.startswith("PROGRESS|"):
-                if progress:
-                    progress(line.split("|", 1)[1])
-            elif line:
-                tail.append(line)
-        proc.wait()
-        if proc.returncode != 0 or not pending.exists():
-            raise RuntimeError("Scan failed:\n" + "\n".join(tail[-20:]))
-        load_scan(pending)
-        pending.replace(out)
+        command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                   "-File", str(ENGINE), "-OutFile", str(pending)]
+        sections = retry_sections(prior) if prior else set()
+        if sections:
+            section_file = Path(staging) / "sections.txt"
+            section_file.write_text("\n".join(sorted(sections)), encoding="utf-8")
+            command.extend(("-SectionsFile", str(section_file)))
+        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              text=True, encoding="utf-8", errors="replace", creationflags=flags) as proc:
+            finished = threading.Event()
+
+            def monitor():
+                while not finished.wait(0.1):
+                    if cancel.is_set():
+                        proc.kill()
+                        break
+
+            if cancel is not None:
+                watcher = threading.Thread(target=monitor, daemon=True)
+                watcher.start()
+            try:
+                tail = []
+                for line in proc.stdout:
+                    line = line.strip()
+                    if line.startswith("PROGRESS|") and progress:
+                        progress(line.split("|", 1)[1])
+                    elif line:
+                        tail = (tail + [line])[-20:]
+                proc.wait()
+            finally:
+                finished.set()
+                if cancel is not None:
+                    watcher.join()
+            if cancel is not None and cancel.is_set():
+                raise ScanCancelled()
+            if proc.returncode != 0 or not pending.exists():
+                raise RuntimeError("Scan failed:\n" + "\n".join(tail))
+            data = load_scan(pending)
+            if sections:
+                pending.write_text(json.dumps(merge_retry(prior, data, sections)), encoding="utf-8")
+            pending.replace(out)
     return out
 
 
@@ -367,6 +426,7 @@ def load_scan(path: Path) -> dict:
         items = [items]
     if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
         raise ValueError("Invalid scanner inventory")
+    data["Items"] = items
     return data
 
 
@@ -382,20 +442,45 @@ def comparison_state(f: Finding) -> tuple:
     return (f.sha256, f.sig, f.signer, *(f.details.get(k) for k in fields))
 
 
-def mark_new(findings: list[Finding], baseline: dict | None) -> int:
+def compare_findings(findings, baseline):
     if not baseline:
-        return 0
-    old = {}
-    for prior in analyze(baseline):
-        old.setdefault(prior.key, set()).add(comparison_state(prior))
-    n = 0
-    for f in findings:
-        if comparison_state(f) not in old.get(f.key, set()):
-            if f.key in old:
-                f.reasons.append("Changed since baseline")
-            f.is_new = True
-            n += 1
-    return n
+        return {}, []
+    prior = analyze(baseline)
+    remaining = set(range(len(prior)))
+    changes = {}
+    # Match exact rows first so multi-action tasks keep their unchanged actions.
+    for finding in findings:
+        match = next((i for i in sorted(remaining) if prior[i].key == finding.key
+                      and comparison_state(prior[i]) == comparison_state(finding)), None)
+        if match is not None:
+            remaining.remove(match)
+            changes[id(finding)] = ("Unchanged", None)
+    for finding in findings:
+        if id(finding) in changes:
+            continue
+        candidates = [i for i in sorted(remaining) if prior[i].key == finding.key]
+        if not candidates:
+            candidates = [i for i in sorted(remaining) if
+                          (prior[i].category, prior[i].name) == (finding.category, finding.name)]
+        if len(candidates) == 1:
+            match = candidates[0]
+            remaining.remove(match)
+            changes[id(finding)] = ("Changed", prior[match])
+        else:
+            changes[id(finding)] = ("Added", None)
+    return changes, [prior[i] for i in sorted(remaining)]
+
+
+def mark_new(findings: list[Finding], baseline: dict | None) -> int:
+    changes, _ = compare_findings(findings, baseline)
+    count = 0
+    for finding in findings:
+        status, _ = changes.get(id(finding), ("Unchanged", None))
+        finding.is_new = status in ("Added", "Changed")
+        if status == "Changed":
+            finding.reasons.append("Changed since baseline")
+        count += finding.is_new
+    return count
 
 
 # ---------------------------------------------------------------- export
