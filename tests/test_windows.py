@@ -39,3 +39,44 @@ class WindowsTests(unittest.TestCase):
                 self.assertTrue(app.stop_btn.instate(["disabled"]))
             finally:
                 app.destroy()
+
+    def test_task_lifecycle(self):
+        import hashlib
+        import json
+        import uuid
+        from analysis import ENGINE
+
+        name = "SystemScanner-Test-" + uuid.uuid4().hex
+        path = "\\"
+        base = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass"]
+
+        def powershell(script):
+            return subprocess.run(base + ["-Command", "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                                          "$ErrorActionPreference='Stop'; " + script],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=45)
+
+        def xml():
+            return powershell(f"[Console]::Write((Export-ScheduledTask -TaskPath '\\' -TaskName '{name}'))").stdout.decode(
+                "utf-8")
+
+        def change(action, definition="", digest=None):
+            request = dict(action=action, path=path, name=name, xml=definition,
+                           digest=digest or hashlib.sha256(definition.encode("utf-8")).hexdigest())
+            return subprocess.run(base + ["-File", str(ENGINE.with_name("task-action.ps1"))],
+                                  input=json.dumps(request), encoding="utf-8", capture_output=True, timeout=45)
+
+        powershell(f"$a=New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '/c exit'; "
+                   f"Register-ScheduledTask -TaskName '{name}' -Action $a | Out-Null")
+        try:
+            result = change("disable", xml(), digest="stale")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("definition changed", result.stderr)
+            for action in ("disable", "enable", "delete"):
+                definition = xml()
+                result = change(action, definition)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            result = change("restore", definition)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("<Actions", xml())
+        finally:
+            powershell(f"Unregister-ScheduledTask -TaskName '{name}' -Confirm:$false -ErrorAction SilentlyContinue")

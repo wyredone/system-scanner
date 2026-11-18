@@ -24,6 +24,7 @@ from tkinter import filedialog, messagebox, ttk
 import analysis as A
 from process_control import stop_process
 from finding_ai import explain_finding, finding_evidence, generate, installed_models
+from startup_workspace import StartupWorkspace
 from review_tools import read_settings, save_settings, fingerprint, redacted_report
 
 BACKGROUND = "#0b1020"
@@ -160,6 +161,7 @@ class App(tk.Tk):
         tabs.add(processes_tab, text="Running Processes")
         tabs.add(self.network_tab, text="Network")
         tabs.add(self.remote_tab, text="Remote Access")
+        self.startup_workspace = StartupWorkspace(self)
         self.build_overview()
         self._build_process_tab(processes_tab)
 
@@ -257,7 +259,7 @@ class App(tk.Tk):
         actions = ttk.Frame(self.dashboard)
         actions.pack(anchor="w")
         for label, action in (("Explain scan", self.explain_scan), ("Ollama settings", self.model_settings),
-                              ("Redacted export", self.export_redacted), ("Retry failed checks", self.retry_failed)):
+                              ("Redacted export", self.export_redacted), ("Settings backup", self.startup_workspace.settings_backup), ("Retry failed checks", self.retry_failed)):
             ttk.Button(actions, text=label, command=action).pack(side="left", padx=(0, 8))
 
     def open_metric(self, choice):
@@ -713,6 +715,7 @@ class App(tk.Tk):
         for finding in self.findings:
             finding.is_new = self.changes.get(id(finding), ("", None))[0] in ("Added", "Changed")
         n_new = sum(f.is_new for f in self.findings)
+        self.startup_workspace.load(data, live)
         self.update_overview(data)
         cats = sorted({f.category for f in self.findings})
         self.cat_box.configure(values=["All"] + cats)

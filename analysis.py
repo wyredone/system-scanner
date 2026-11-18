@@ -94,7 +94,7 @@ class Finding:
             f"SHA256:    {self.sha256}",
         ]
         if self.details:
-            lines.append("Details:   " + "; ".join(f"{k}={v}" for k, v in self.details.items() if v not in ("", None)))
+            lines.append("Details:   " + "; ".join(f"{k}={v}" for k, v in self.details.items() if k != "TaskXml" and v not in ("", None)))
         lines.append("")
         lines.append("Why flagged:" if self.reasons else "Why flagged: nothing suspicious found")
         lines += [f"  - {r}" for r in self.reasons]
@@ -438,7 +438,7 @@ def previous_scan(current: Path) -> Path | None:
 
 
 def comparison_state(f: Finding) -> tuple:
-    fields = ("StartMode", "State", "Sessions", "Last", "Enabled", "UpToDate", "PayloadSHA256", "PayloadSignature")
+    fields = ("StartMode", "State", "TaskDigest", "Sessions", "Last", "Enabled", "UpToDate", "PayloadSHA256", "PayloadSignature")
     return (f.sha256, f.sig, f.signer, *(f.details.get(k) for k in fields))
 
 
@@ -492,7 +492,7 @@ def export_csv(findings: list[Finding], path: Path) -> None:
         for f in findings:
             values = [f.severity, "yes" if f.is_new else "", f.category, f.name, f.command, f.path, f.sig,
                         f.signer, f.company, f.created, f.sha256, " | ".join(f.reasons),
-                        "; ".join(f"{k}={v}" for k, v in f.details.items())]
+                        "; ".join(f"{k}={v}" for k, v in f.details.items() if k != "TaskXml")]
             w.writerow(["'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value for value in values])
 
 

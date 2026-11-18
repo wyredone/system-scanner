@@ -264,7 +264,13 @@ if (!$SectionsFile -or $selectedSections -contains 'Scheduled tasks') {
     $i = 0
     foreach ($t in $tasks) {
         $i++; if ($i % 40 -eq 0) { Say "Scheduled tasks ($i of $($tasks.Count))" }
-        $info = $null
+        $taskXml = Export-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName
+        $taskDigest = ''
+        if ($taskXml) {
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $taskDigest = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($taskXml))).Replace('-', '') }
+            finally { $sha.Dispose() }
+        }
         foreach ($a in $t.Actions) {
             $exe = if ($a.Execute) { ([string]$a.Execute).Trim().Trim('"') } else { '' }
             if ($exe) {
@@ -277,6 +283,7 @@ if (!$SectionsFile -or $selectedSections -contains 'Scheduled tasks') {
                 if ($clsid) { $path = [Environment]::ExpandEnvironmentVariables([string]$clsid.'(default)') }
             } else { continue }
             Add-Entry 'Task' "$($t.TaskPath)$($t.TaskName)" $cmd @{
+                TaskPath = $t.TaskPath; TaskName = $t.TaskName; TaskDigest = $taskDigest; TaskXml = $taskXml
                 State = [string]$t.State; Author = [string]$t.Author; RunAs = [string]$t.Principal.UserId
                 RunLevel = [string]$t.Principal.RunLevel; Hidden = [bool]$t.Settings.Hidden
                 Registered = [string]$t.Date; WorkingDir = [string]$a.WorkingDirectory

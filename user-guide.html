@@ -29,6 +29,32 @@ dd { margin: 0 0 .6rem; }
 </nav>
 </header>
 <main>
+<section id="quick-start">
+<h2>Quick Start</h2>
+<ol>
+<li>Run a scan on your PC and open Startup &amp; Tasks.</li>
+<li>Save a named baseline snapshot. Scan again after a software install or other change.</li>
+<li>Choose the baseline under Before and Current under After. Select an Added or Changed row to compare its evidence.</li>
+<li>Use Explain for an advisory local Ollama explanation. Use Hash lookup if you want to send the file hash to VirusTotal.</li>
+<li>For a confirmed unwanted live task, select Disable and review the prompt. The automatic rescan shows the new state.</li>
+</ol>
+</section>
+<section id="startup-snapshots">
+<h2>Startup and scheduled-task snapshots</h2>
+<p>The workspace includes scanned Registry Run entries, Startup folder items, and scheduled task actions. Before and After accept a saved scan from the list or a full snapshot path. Compare snapshots collected from the same PC. Scan coverage and permissions can affect whether an entry appears.</p>
+<p>A task can have multiple actions. A TaskDigest change indicates that its exported definition changed. Saved snapshots contain scan details and can include private paths, commands and task definitions.</p>
+</section>
+<section id="startup-actions">
+<h2>Disable, delete, restore, and block</h2>
+<p>Actions to change Windows apply to selected live scheduled tasks. Take a new full scan first. Permissions depend on the task. If Windows denies access, use Run as admin and scan again. The scanner checks that the complete task definition still matches the scan before acting.</p>
+<p>Disable is reversible with Enable. Delete writes the task definition to scans/task-backups first. Restore task reads a trusted backup and registers the saved task only when the destination is vacant. A restored task can run automatically. Tasks that require a password or depend on accounts, programs, or folders unavailable on this PC may need Windows Task Scheduler.</p>
+<p>Block / Unblock disables a live scheduled task when necessary and saves a watch for that entry. For Registry and Startup folder entries, it saves a watch. A later scan shows Block alert if the watched entry is present and not verified disabled. Unblock removes the watch. Use Enable separately for a disabled task. Watches run at scan time and do not prevent executables from launching.</p>
+</section>
+<section id="settings-backup">
+<h2>Settings backup and restore</h2>
+<p>Open Settings backup from Overview. Export settings saves a versioned JSON file with the model choice, review notes, and block watches. Review notes and rule names may contain information you entered or identifiers from the scan.</p>
+<p>Import settings shows additions and replacements before applying the backup. Merge keeps local keys that the backup does not replace. Replace loads the backup as your saved settings. The current settings are backed up under scans before either operation. Imported watches are scan-time rules. Open Ollama settings and use Test connection to verify that the preferred model exists on this PC.</p>
+</section>
 <section id="scan">
 <h2>Run a scan</h2>
 <ol>
