@@ -130,6 +130,7 @@ class App(tk.Tk):
         self.help_tip(filt, "Finding filters",
                       "High and Medium are review priorities. Info is hidden initially. "
                       "NEW compares category, name, path, and command against the previous saved scan.")
+        ttk.Button(filt, text="Absent entries", command=self.show_absent).pack(side="left")
         pane = ttk.PanedWindow(findings_tab, orient="vertical")
         pane.pack(fill="both", expand=True, padx=8, pady=(4, 8))
 
@@ -174,6 +175,17 @@ class App(tk.Tk):
         ttk.Button(parent, text="?", width=3,
                    command=lambda: messagebox.showinfo(title, description, parent=self)
                    ).pack(side="left", padx=4)
+
+    def show_absent(self) -> None:
+        from tkinter.scrolledtext import ScrolledText
+        dialog = tk.Toplevel(self)
+        dialog.title("Prior entries absent from this scan")
+        table = ScrolledText(dialog, width=95, height=24, wrap="word")
+        table.pack(fill="both", expand=True)
+        rows = getattr(self, "absent_entries", [])
+        table.insert("end", "\n".join(f"{f.category} | {f.name} | {f.path or f.command}" for f in rows)
+                     or "No absent entries available from a baseline comparison.")
+        table.configure(state="disabled")
 
     def open_guide(self) -> None:
         guide = A.APP_DIR / "user-guide.html"
@@ -377,14 +389,15 @@ class App(tk.Tk):
             baseline = None
             messagebox.showwarning("Baseline unavailable", "Previous scan could not be read. Showing current results.")
         n_new = A.mark_new(self.findings, baseline)
+        current_keys = {f.key for f in self.findings}
+        self.absent_entries = [f for f in A.analyze(baseline) if f.key not in current_keys] if baseline else []
         cats = sorted({f.category for f in self.findings})
         self.cat_box.configure(values=["All"] + cats)
         counts = {s: sum(1 for f in self.findings if f.severity == s) for s in A.SEVERITIES}
         new_txt = (f"   |   {n_new} new or changed since {prev.stem.rsplit('_', 2)[1]}-{prev.stem.rsplit('_', 1)[1][:4]}"
                    if prev else "   |   first scan of this PC (next scan will show what changed)")
         if baseline:
-            current_keys = {f.key for f in self.findings}
-            absent = sum(f.key not in current_keys for f in A.analyze(baseline))
+            absent = len(self.absent_entries)
             new_txt += f" | {absent} prior entries absent"
             if baseline.get("Meta", {}).get("Admin") != self.meta.get("Admin"):
                 new_txt += " | Scan privileges differ"

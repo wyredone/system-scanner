@@ -1,0 +1,19 @@
+name: Windows scanner checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -v
+      - name: Run collector and analyze real inventory
+        shell: powershell
+        run: |
+          ./engine/collect.ps1 -OutFile "$env:RUNNER_TEMP/inventory.json"
+          python -c "import analysis,os,pathlib; d=analysis.load_scan(pathlib.Path(os.environ['RUNNER_TEMP'])/'inventory.json'); assert analysis.process_findings(d); assert d['Meta']['Coverage']; assert analysis.analyze(d)"

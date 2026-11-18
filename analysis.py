@@ -132,6 +132,12 @@ def analyze_item(it: dict) -> Finding:
     if SUSPICIOUS_CMD.search(cmd):
         sev = _bump(sev, "High" if (not signed_ok or in_user_dir) else "Medium")
         reasons.append("Command line uses scripting, encoding, hidden windows or downloads (common malware tricks)")
+    if details.get("PayloadPath"):
+        payload_sig = details.get("PayloadSignature")
+        if payload_sig != "Valid":
+            severity = "High" if payload_sig == "HashMismatch" else "Medium"
+            sev = _bump(sev, severity)
+            reasons.append(f"Referenced script or DLL signature status: {payload_sig or 'unknown'}")
     if cat in ("IFEO", "AppCertDll"):
         sev = _bump(sev, "Medium" if signed_ok else "High")
         reasons.append("Hijacks how another program starts (Image File Execution Options / AppCert DLL)")
@@ -359,7 +365,7 @@ def previous_scan(current: Path) -> Path | None:
 
 
 def comparison_state(f: Finding) -> tuple:
-    fields = ("StartMode", "State", "Sessions", "Last", "Enabled", "UpToDate")
+    fields = ("StartMode", "State", "Sessions", "Last", "Enabled", "UpToDate", "PayloadSHA256", "PayloadSignature")
     return (f.sha256, f.sig, f.signer, *(f.details.get(k) for k in fields))
 
 
@@ -386,9 +392,10 @@ def export_csv(findings: list[Finding], path: Path) -> None:
         w.writerow(["Severity", "New", "Category", "Name", "Command", "File", "Signature", "Signer",
                     "Company", "Created", "SHA256", "Reasons", "Details"])
         for f in findings:
-            w.writerow([f.severity, "yes" if f.is_new else "", f.category, f.name, f.command, f.path, f.sig,
+            values = [f.severity, "yes" if f.is_new else "", f.category, f.name, f.command, f.path, f.sig,
                         f.signer, f.company, f.created, f.sha256, " | ".join(f.reasons),
-                        "; ".join(f"{k}={v}" for k, v in f.details.items())])
+                        "; ".join(f"{k}={v}" for k, v in f.details.items())]
+            w.writerow(["'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value for value in values])
 
 
 def export_html(findings: list[Finding], meta: dict, path: Path, min_severity: str = "Low") -> None:

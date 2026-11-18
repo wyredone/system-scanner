@@ -70,6 +70,18 @@ $items = New-Object System.Collections.Generic.List[object]
 function Add-Entry([string]$category, [string]$name, [string]$command, [hashtable]$details, [string]$pathOverride) {
     $p = if ($PSBoundParameters.ContainsKey('pathOverride')) { $pathOverride } else { Get-ExePath $command }
     $f = Get-FileFacts $p
+    # Inspect literal local payload paths referenced by common script and DLL hosts.
+    if ($p -and ([IO.Path]::GetFileNameWithoutExtension($p) -in @('powershell','pwsh','wscript','cscript','rundll32','regsvr32'))) {
+        $pattern = '(?i)"(?<target>[a-z]:\\[^"]+?\.(?:ps1|vbs|js|dll))"|(?<!\S)(?<target>[a-z]:\\[^\s",]+\.(?:ps1|vbs|js|dll))(?=[\s,]|$)'
+        $match = [regex]::Match($command, $pattern)
+        if ($match.Success) {
+            $payload = $match.Groups['target'].Value
+            $facts = Get-FileFacts $payload
+            $details.PayloadPath = $payload
+            $details.PayloadSignature = $facts.Sig
+            $details.PayloadSHA256 = $facts.SHA256
+        }
+    }
     $items.Add([ordered]@{
         Category = $category; Name = $name; Command = $command; Path = $p
         Exists = $f.Exists; Sig = $f.Sig; Signer = $f.Signer; SHA256 = $f.SHA256

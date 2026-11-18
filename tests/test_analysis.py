@@ -13,3 +13,8 @@ class ScannerTests(unittest.TestCase):
         current = Finding("Info", "Task", "Example", sha256="new")
         self.assertEqual(mark_new([current], {"Items": [item]}), 1)
         self.assertIn("Changed since baseline", current.reasons)
+
+    def test_payload_signature(self):
+        item = dict(Category="Task", Name="Example", Details={
+            "PayloadPath": "sample.dll", "PayloadSignature": "HashMismatch"})
+        self.assertEqual(analyze_item(item).severity, "High")
