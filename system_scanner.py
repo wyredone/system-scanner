@@ -25,6 +25,7 @@ from tkinter import filedialog, messagebox, ttk
 import analysis as A
 from process_control import stop_process
 from finding_ai import explain_finding, finding_evidence, generate, installed_models
+from investigation import Investigation, sortable, reveal
 from startup_workspace import StartupWorkspace
 from review_tools import read_settings, save_settings, fingerprint, redacted_report
 
@@ -157,6 +158,10 @@ class App(tk.Tk):
         findings_tab = ttk.Frame(tabs)
         processes_tab = ttk.Frame(tabs, padding=8)
         self.tabs, self.findings_tab = tabs, findings_tab
+        self.process_tab = processes_tab
+        self.investigation = Investigation(self)
+        self.inventory_trees = {}
+        tabs.bind("<<NotebookTabChanged>>", lambda _: self.restore_investigation())
         self.dashboard = ttk.Frame(tabs, padding=20)
         self.network_tab = ttk.Frame(tabs, padding=12)
         self.remote_tab = ttk.Frame(tabs, padding=12)
@@ -293,7 +298,29 @@ class App(tk.Tk):
                         severity == "Medium" if choice == "Incomplete checks" else True)
         self.refresh()
 
-    def render_inventory(self, frame, columns, rows):
+    def restore_investigation(self):
+        self.investigation.clear()
+        tab = self.tabs.select()
+        if tab == str(self.findings_tab):
+            self.on_select()
+        elif tab == str(self.process_tab):
+            self.show_process()
+        elif tab == str(self.startup_workspace.frame):
+            self.startup_workspace.detail()
+        else:
+            for frame, tree in self.inventory_trees.items():
+                if str(frame) == tab and tree.selection():
+                    tree.event_generate("<<TreeviewSelect>>")
+
+    def focus_inventory(self, frame, index):
+        tree = self.inventory_trees.get(frame)
+        if tree and tree.exists(str(index)):
+            self.tabs.select(frame)
+            tree.selection_set(str(index))
+            tree.see(str(index))
+
+    def render_inventory(self, frame, columns, rows, handler):
+        self.inventory_trees.pop(frame, None)
         for child in frame.winfo_children():
             child.destroy()
         if not rows:
@@ -303,8 +330,14 @@ class App(tk.Tk):
         for column in columns:
             tree.heading(column, text=column)
             tree.column(column, width=125, minwidth=85)
-        for row in rows:
-            tree.insert("", "end", values=row)
+        for i, row in enumerate(rows):
+            tree.insert("", "end", iid=str(i), values=row)
+        sortable(tree)
+        self.inventory_trees[frame] = tree
+        def selected(_event):
+            if tree.selection() and self.tabs.select() == str(frame):
+                handler(int(tree.selection()[0]))
+        tree.bind("<<TreeviewSelect>>", selected)
         scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
@@ -315,6 +348,8 @@ class App(tk.Tk):
 
     def update_overview(self, data):
         process_by_pid = {row.details.get("PID"): row for row in self.process_rows}
+        self.process_by_pid = process_by_pid
+        self.network_records = data.get("Network") or []
         network = []
         for row in data.get("Network", []):
             process = process_by_pid.get(row.get("PID"))
@@ -325,21 +360,26 @@ class App(tk.Tk):
                 process.details.get("Services", "") if process else ""))
         self.render_inventory(self.network_tab,
             ("Protocol", "State", "Local endpoint", "Remote endpoint", "PID", "Executable", "Publisher", "Services"),
-            network)
+            network, lambda index: self.inspect_endpoint(index))
         remote = []
+        remote_sources = []
         seen = set()
         for row in sorted(data.get("RemoteSessions", []), key=lambda entry: entry.get("When", ""), reverse=True):
             values = tuple(row.get(key, "") for key in ("When", "Tool", "Direction", "RemoteId", "Method"))
             if values not in seen:
                 seen.add(values)
                 remote.append(values)
+                remote_sources.append(A.Finding("Info", "RemoteSession", f"{values[1]} {values[2]}",
+                                                details=dict(zip(("Time","Tool","Direction","Remote ID","Method"),values))))
         for finding in [*self.findings, *self.process_rows]:
             if A.REMOTE_TOOLS.search(f"{finding.name} {finding.path}"):
+                remote_sources.append(finding)
                 remote.append(("", finding.name, "Running" if finding.category == "Process" else "Detected", "", finding.category))
         if "AnyDeskUnattended" in data:
+            remote_sources.append(A.Finding("Info","RemoteAccess","AnyDesk unattended access", details={"Password indicator": data["AnyDeskUnattended"]}))
             remote.append(("", "AnyDesk", "Unattended access", "",
                            "Password setting detected" if data["AnyDeskUnattended"] else "Password setting not detected"))
-        self.render_inventory(self.remote_tab, ("Time", "Tool or entry", "Activity", "Remote ID", "Details"), remote)
+        self.render_inventory(self.remote_tab, ("Time", "Tool or entry", "Activity", "Remote ID", "Details"), remote, lambda index: self.investigation.select(remote_sources[index]))
         counts = (sum(f.severity == "High" for f in self.findings),
                   sum(status == "Added" for status, _ in self.changes.values()),
                   sum(status == "Changed" for status, _ in self.changes.values()),
@@ -347,6 +387,12 @@ class App(tk.Tk):
                   sum(str(v).startswith("Partial") for v in self.meta.get("Coverage", {}).values()))
         for (title, button), count in zip(self.metrics.items(), counts):
             button.configure(text=f"{count}\n{title}")
+
+    def inspect_endpoint(self, index):
+        record = self.network_records[index]
+        owner = self.process_by_pid.get(record.get("PID"))
+        row = owner or A.Finding("Info", "Network", f"{record.get('Protocol')} endpoint", details=record)
+        self.investigation.select(row, destination=str(record.get("RemoteAddress") or ""), network_index=index)
 
     def review_note(self):
         from tkinter.simpledialog import askstring
@@ -605,6 +651,7 @@ class App(tk.Tk):
         self.process_tree.pack(side="left", fill="both", expand=True)
         for severity, color in SEV_COLORS.items():
             self.process_tree.tag_configure(severity, background=color)
+        sortable(self.process_tree)
         self.process_tree.bind("<<TreeviewSelect>>", self.show_process)
         self.process_detail = tk.Text(frame, height=12, wrap="word", state="disabled")
         self.process_detail.pack(fill="x")
@@ -615,6 +662,8 @@ class App(tk.Tk):
 
     def show_process(self, _event=None) -> None:
         process = self.selected_process()
+        if self.tabs.select() == str(self.process_tab):
+            self.investigation.select(process)
         can_stop = (
             self.live_processes and not self.busy and process and process.path
             and process.details.get("StartTicks")
@@ -766,6 +815,7 @@ class App(tk.Tk):
             messagebox.showerror("Could not read scan", str(exc))
             return
         self.last_live_scan = data if live or collected else None
+        self.investigation.clear()
         self.scan_file = Path(path)
         self.meta = data.get("Meta") or {}
         self.load_process_rows(data, live)
@@ -860,7 +910,10 @@ class App(tk.Tk):
         return self.visible[int(sel[0])] if sel else None
 
     def on_select(self, _event=None) -> None:
-        self._show_detail(self.selected())
+        item = self.selected()
+        self._show_detail(item)
+        if self.tabs.select() == str(self.findings_tab):
+            self.investigation.select(item, self.changes.get(id(item), ("", None))[1])
 
     def _show_detail(self, f: A.Finding | None) -> None:
         self.detail.configure(state="normal")
@@ -916,10 +969,11 @@ class App(tk.Tk):
 
     def on_open_location(self) -> None:
         f = self.selected()
-        if f and f.path and os.path.exists(f.path):
-            subprocess.Popen(["explorer.exe", "/select,", f.path])
-        elif f:
-            self.status.set("File not found on disk")
+        if f:
+            try:
+                reveal(f.path)
+            except (ValueError, OSError) as exc:
+                self.status.set(str(exc))
 
     def _copy(self, text: str) -> None:
         self.clipboard_clear()

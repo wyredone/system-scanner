@@ -10,6 +10,7 @@ from uuid import uuid4
 import webbrowser
 
 import analysis as A
+from investigation import sortable
 from review_tools import save_settings
 from startup_entry_control import remove_run_entry, restore_run_entry
 
@@ -54,6 +55,7 @@ class StartupWorkspace:
             self.table.heading(col, text=col.title())
         self.table.column("change", width=125, stretch=False)
         self.table.column("kind", width=125, stretch=False)
+        sortable(self.table)
         self.table.bind("<<TreeviewSelect>>", lambda _: self.detail())
         body.add(self.table, weight=3)
         evidence = ttk.PanedWindow(body, orient="horizontal")
@@ -144,20 +146,23 @@ class StartupWorkspace:
             if tracked:
                 state += " · Blocked" if row.details.get("State") == "Disabled" else " · Block alert"
             self.rows.append((prior or (row if state.startswith("Unchanged") else None), row))
-            self.table.insert("", "end", values=(state, row.category, row.name))
+            self.table.insert("", "end", iid=str(len(self.rows)-1), values=(state, row.category, row.name))
         for row in absent:
             if row.category in CATEGORIES and (choice in ("All entries", "Absent")
                     or (choice == "Blocked" and self.identity(row) in blocked)):
                 self.rows.append((row, None))
-                self.table.insert("", "end", values=("Absent", row.category, row.name))
+                self.table.insert("", "end", iid=str(len(self.rows)-1), values=("Absent", row.category, row.name))
         self.detail()
 
     def current_row(self):
         selected = self.table.selection()
-        return self.rows[self.table.index(selected[0])] if selected else (None, None)
+        return self.rows[int(selected[0])] if selected else (None, None)
 
     def detail(self):
-        for box, item in zip(self.details, self.current_row()):
+        pair = self.current_row()
+        if self.app.tabs.select() == str(self.frame):
+            self.app.investigation.select(pair[1] or pair[0], pair[0], related=bool(pair[1]) and self.pickers[1].get() == "Current")
+        for box, item in zip(self.details, pair):
             box.configure(state="normal")
             box.delete("1.0", "end")
             if item:
@@ -346,7 +351,7 @@ class StartupWorkspace:
         path = filedialog.asksaveasfilename(parent=self.app, initialfile="scanner-settings.json", defaultextension=".json")
         if not path:
             return
-        data = {key: self.app.settings[key] for key in ("model", "notes", "blocks", "sounds") if key in self.app.settings}
+        data = {key: self.app.settings[key] for key in ("model", "notes", "blocks", "sounds", "auto_hash") if key in self.app.settings}
         try:
             Path(path).write_text(json.dumps({"version": 1, "settings": data}, indent=2), encoding="utf-8")
         except OSError as exc:
@@ -361,8 +366,10 @@ class StartupWorkspace:
             if data["version"] != 1 or not isinstance(data["settings"], dict):
                 raise ValueError("Unsupported settings version")
             candidate = data["settings"]
-            if set(candidate) - {"model", "notes", "blocks", "sounds"}:
+            if set(candidate) - {"model", "notes", "blocks", "sounds", "auto_hash"}:
                 raise ValueError("Unknown setting")
+            if "auto_hash" in candidate and not isinstance(candidate["auto_hash"], bool):
+                raise ValueError("Invalid lookup preference")
             if "sounds" in candidate and not isinstance(candidate["sounds"], bool):
                 raise ValueError("Invalid sound preference")
             model = candidate.get("model", "")
@@ -385,6 +392,7 @@ class StartupWorkspace:
             previous = self.app.settings.get(key, {})
             text.append(f"{key.title()}: {len(incoming.keys() - previous.keys())} added, "
                         f"{sum(k in previous and previous[k] != v for k, v in incoming.items())} replaced")
+        text.append(f"Automatic online hash lookup in backup: {candidate.get('auto_hash', False)}")
         text.append("Importing block watches does not apply Windows actions.")
         ttk.Label(panel, text="\n".join(text), justify="left").pack(pady=8)
 
@@ -403,6 +411,7 @@ class StartupWorkspace:
                 messagebox.showerror("Import failed", str(exc), parent=window)
                 return
             self.app.settings = result
+            self.app.investigation.auto.set(bool(result.get("auto_hash", False)))
             self.app.sound_toggle.set(result.get("sounds", False))
             if result.get("model"):
                 os.environ["SCANNER_OLLAMA_MODEL"] = result["model"]

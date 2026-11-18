@@ -107,6 +107,10 @@ dd { margin: 0 0 .6rem; }
 <section id="priority"><h2>Review priority and flags</h2>
 <p>The Priority column sorts findings by review urgency. High starts at 70, Medium at 40, and Low at 10. Distinct flags add up to 29 points. For example, a signature mismatch adds 18 and script behavior adds 6. An informational entry or collection coverage message receives zero. The score measures rule-based urgency. A malware probability would require calibration against labeled examples.</p>
 <p>Read the Flags column and select a row to see the reason for each rule match. Running Processes also opens in priority order. Enable Scan sounds on Overview for audible completion, high-priority, and scan-error alerts.</p></section>
+<section><h2>Investigate a selected record</h2>
+<p>Select a finding, process, startup action, network endpoint, or remote-access record. The investigation pane links matching hashes, file paths, and process-owned endpoints. Open folder selects an existing file in Explorer on this PC. Click a table heading twice to reverse its order.</p>
+<p>Hash lookup queries VirusTotal by SHA-256. Open Lookup settings to enter a session-only API key or set VT_API_KEY before launching. Automatic lookup is optional. Positive, unknown, and failed results have separate labels. Successful results are cached for 30 minutes during the session. Optional scan sounds also signal detections and lookup errors.</p>
+<p>Web search previews the exact query before opening your browser. Explain evidence uses local Ollama with selected record details, related records, available reputation results, and the baseline command when available. Citation numbers refer to those four evidence sources.</p></section>
 </main>
 </body>
 </html>
