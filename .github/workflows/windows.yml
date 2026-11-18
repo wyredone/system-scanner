@@ -17,3 +17,11 @@ jobs:
         run: |
           ./engine/collect.ps1 -OutFile "$env:RUNNER_TEMP/inventory.json"
           python -c "import analysis,os,pathlib; d=analysis.load_scan(pathlib.Path(os.environ['RUNNER_TEMP'])/'inventory.json'); assert analysis.process_findings(d); assert d['Meta']['Coverage']; assert analysis.analyze(d)"
+      - name: Package scanner
+        shell: powershell
+        run: |
+          Compress-Archive -Path *.py,*.bat,README.md,user-guide.html,engine -DestinationPath system-scanner.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: system-scanner-windows
+          path: system-scanner.zip
